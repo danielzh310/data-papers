@@ -1,0 +1,430 @@
+---
+title: "Unveiling the Impact of 8 a.m. Classes: A Comprehensive Analysis of Sleep Duration and Academic Performance in Higher Education"
+author: "Daniel Zhu"
+date: "October 13th, 2023"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(gridExtra)
+library(alr4)
+library(regressinator)
+library(modelsummary)
+library(broom)
+library(lmtest)
+library(knitr)
+library(caret)
+library(dplyr)
+```
+
+#  Introduction
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;These days, academic powerhouses such as Carnegie Mellon University, are grappling with the challenge of meeting the diverse schedule needs of their student bodies. A controversial issue in this debate was the introduction of 8am classes, which, although sometimes necessary to optimize  timetables, was met with resistance from both teachers and students. At the heart of this concern is the potential impact of early morning classes on students' sleep patterns and, in turn, their academic performance.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;This report seeks to answer a core question which is: "Do 8 a.m. classes have a negative impact on students' academic performance?" Specifically, our goal was to find a significant relationship between students' `sleep duration` and  `semester grade point average` (GPA). is to find out if there is. This analysis is based on the need to provide empirical evidence to the Carnegie Mellon University Registrar, which is responsible for decisions regarding the  8 a.m. class schedule. The data used in this study came from a comprehensive research project conducted at Carnegie Mellon University and two other academic institutions. 
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The project involved recruiting a student to wear a sleep tracking device, specifically their Fitbits, for one month during the spring semester. These Fitbits recorded each student's average nightly sleep time, excluding naps. Additionally, this study compiled data on each student's semester GPA and  cumulative GPA for the previous semester. Notably, the researchers refrained from changing students' schedules and only collected data on sleep patterns and academic performance.  The dataset contains information from 634 students and includes key variables such as `TotalSleepTime` (average nightly sleep time), `term_gpa` (semester GPA), and `cum_gpa` (cumulative GPA).
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;In summary, this report aims to reveal the relationship between sleep duration and students' academic performance. We hope that examining the data collected in this study will support the decision-making process related to the  8 a.m. class schedule and provide valuable insight into the broader discussion on the interplay between sleep and cognitive performance in academia.
+
+\newpage
+
+#  Exploratory Data Analysis & Data Summary
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+cmu_sleep <- read.csv("/Users/class/Box/My Documents/36-401/Data Exams/Project 1/cmu-sleep.csv")
+data <- cmu_sleep
+```
+
+###   To address the inquiry regarding the influence of sleep on academic performance using this dataset, this report will direct its attention to addressing the following inquiries:
+
+`Research Question #1: What is the association between sleep time and GPA? Is there evidence that students who sleep less indeed get lower GPAs?`
+
+`Research Question #2:  We expect that students would sleep 2 hours less, on average, if they have to get up for an 8am class. What average GPA effect do we expect to see with 2 hours less sleep?`
+
+`Research Question #3:  Based on the data, can we conclude that the GPA change is caused by less sleep, or could their be other reasons for the relationship?`
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+data <- cmu_sleep
+
+# Create summary statistics tables for continuous variables
+summary_table <- data.frame(
+  Variable = c("TotalSleepTime", "midpoint_sleep", "cum_gpa", "term_gpa"),
+  Mean = c(mean(data$TotalSleepTime), mean(data$midpoint_sleep), 
+           mean(data$cum_gpa), mean(data$term_gpa)),
+  Median = c(median(data$TotalSleepTime), median(data$midpoint_sleep), 
+             median(data$cum_gpa), median(data$term_gpa)),
+  Min = c(min(data$TotalSleepTime), min(data$midpoint_sleep), min(data$cum_gpa),
+          min(data$term_gpa)),
+  Max = c(max(data$TotalSleepTime), max(data$midpoint_sleep), max(data$cum_gpa), 
+          max(data$term_gpa)),
+  Q1 = c(quantile(data$TotalSleepTime, 0.25), 
+         quantile(data$midpoint_sleep, 0.25), quantile(data$cum_gpa, 0.25), 
+         quantile(data$term_gpa, 0.25)),
+  Q3 = c(quantile(data$TotalSleepTime, 0.75), 
+         quantile(data$midpoint_sleep, 0.75), quantile(data$cum_gpa, 0.75), 
+         quantile(data$term_gpa, 0.75))
+)
+
+# Create frequency distribution tables for categorical variables
+table_demo_race <- table(data$demo_race)
+table_demo_gender <- table(data$demo_gender)
+table_demo_firstgen <- table(data$demo_firstgen)
+
+# Print the summary statistics tables
+kable(summary_table, digits = 2, format = "markdown")
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The table above shows summary statistics calculations on three main variables in the data set. `TotalSleepTime`, `term_gpa`, and `cum_gpa`. These variables are important for understanding different aspects of the dataset. `TotalSleepTime` represents the total sleep time recorded by each student during their one month study period wearing a sleep tracking device, specifically their Fitbits. Summary statistics for this variable include key metrics such as mean, median, minimum, maximum, and quartiles of sleep duration recorded across all participants. 
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Together, these statistics  provide a comprehensive overview of the distribution of sleep duration across the dataset. `term_gpa` probably means the grade point average (GPA) achieved by each student during each semester, specifically the spring semester in which the study was conducted. Summary statistics for this variable include important measurements such as median GPA, median GPA, minimum GPA, maximum GPA, and quartiles. These statistics provide insight into the distribution of semester GPA among  students in the dataset during the spring semester. `cum_gpa` is probably an abbreviation for cumulative GPA, which refers to a student's overall academic performance. This includes all  academic records prior to the spring semester in which the study was conducted. `cum_gpa` summary statistics include metrics such as median cumulative GPA, median cumulative GPA, minimum cumulative GPA, maximum cumulative GPA, and quartiles. Collectively, these statistics  provide an overall overview of the distribution of cumulative grade point averages among  students in the dataset, taking into account their entire academic career.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Histogram of TotalSleepTime
+sleepHist = data %>%
+  ggplot(aes(x = TotalSleepTime)) +
+  geom_histogram(binwidth = 30, fill = "lightblue", alpha = 0.7) +
+  labs(title = "Distribution of Total Sleep Time",
+       x = "Total Sleep Time (minutes)",
+       y = "Frequency")
+# Histogram of term GPA
+termgpaHist = data %>%
+  ggplot(aes(x = term_gpa)) +
+  geom_histogram(binwidth = 0.2, fill = "lightgreen", alpha = 0.7) +
+  labs(title = "Distribution of Term GPA",
+       x = "Term GPA",
+       y = "Frequency")
+# Histogram of cumulative GPA
+cumgpaHist = data %>%
+  ggplot(aes(x = cum_gpa)) +
+  geom_histogram(binwidth = 0.2, fill = "lightpink", alpha = 0.7) +
+  labs(title = "Distribution of Cumulative GPA",
+       x = "Cumulative GPA",
+       y = "Frequency")
+grid.arrange(sleepHist, termgpaHist, cumgpaHist,nrow = 2, ncol = 2)
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Looking at the histograms above, it is evident that both GPA plots exhibit a strong left-skewness and display unimodal distributions. The majority of data points within these distributions fall within the range of 3.0 to 4.0, with the peak frequency occurring between 3.7 and 4.0 for both histograms.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;In contrast, when examining the distribution of sleep time, it appears to be unimodal and approximately follows a normal distribution. This distribution centers around 400 minutes of sleep per night, equivalent to approximately 6.5 hours.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Create a scatterplot of TotalSleepTime vs. term_gpa
+scatterPlot1 = ggplot(data, aes(x = TotalSleepTime, y = term_gpa )) +
+  geom_point() +
+  labs(x = "Total Sleep Time (minutes)", y = "Term GPA") +
+  ggtitle("TotalSleepTime vs. term_gpa")
+
+# Create a scatterplot of TotalSleepTime vs. cum_gpa
+scatterPlot2 = ggplot(data, aes(x = TotalSleepTime, y = cum_gpa)) +
+  geom_point() +
+  labs(x = "Total Sleep Time (minutes)", y = "Cumulative GPA") +
+  ggtitle("TotalSleepTime vs. cum_gpa")
+
+grid.arrange(scatterPlot1, scatterPlot2, ncol = 2)
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Analyzing the information presented in these two scatterplots, we observe a discernible correlation between the amount of sleep students receive and their GPAs. In general, it appears that students who sleep less tend to have lower GPAs. However, it's noteworthy that students who oversleep might also exhibit lower GPAs, as no student who slept more than 500 minutes a day achieved a 4.0 GPA.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Interestingly, the students who slept approximately 500 minutes daily tend to have higher GPAs compared to those who slept between 200 and 300 minutes. Notably, within the group of students who slept over 500 minutes, there are no instances of cumulative GPAs lower than 3.0 and term GPAs below 2.75, in stark contrast to the group that slept between 200 and 300 minutes, where GPAs below 2.0 are observed.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;In summary, based on these plots and our exploratory data analysis (EDA), there seems to be a positive association between sleep time and GPA, with students who achieve more sleep tending to have higher GPAs. However, this association is not strictly linear, as there are variations depending on the amount of sleep.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Create a scatterplot for GPA change vs. TotalSleepTime
+morePlots1 = ggplot(data, aes(x = TotalSleepTime, y = cum_gpa - term_gpa)) +
+  geom_point() +
+  labs(x = "Total Sleep Time (minutes)", y = "GPA Change (cumulative - term)") +
+  ggtitle("GPA Change vs. Total Sleep Time")
+
+# Create a scatterplot for GPA change vs. bedtime_mssd (bedtime variability)
+morePlots2 = ggplot(data, aes(x = bedtime_mssd, y = cum_gpa - term_gpa)) +
+  geom_point() +
+  labs(x = "Bedtime MSSD (bedtime variability)", y = "GPA Change (cumulative - term)") +
+  ggtitle("GPA Change vs. Bedtime \n Variability")
+
+# Create a scatterplot for GPA change vs. daytime_sleep
+morePlots3 = ggplot(data, aes(x = daytime_sleep, y = cum_gpa - term_gpa)) +
+  geom_point() +
+  labs(x = "Daytime Sleep (minutes)", y = "GPA Change (cumulative - term)") +
+  ggtitle("GPA Change vs. Daytime Sleep")
+
+grid.arrange(morePlots1, morePlots2, morePlots3, ncol = 2)
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Upon examining these scatterplots, an apparent correlation emerges between the amount of sleep a student receives and their GPA. In general, students with reduced sleep durations tend to exhibit lower GPAs. However, it's noteworthy that students with excessive sleep durations may also experience lower GPAs, as none of those who slept for more than 500 minutes daily achieved a cumulative or term GPA of 4.0.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Interestingly, students who slept for approximately 500 minutes daily appear to possess higher GPAs than those who had sleep durations ranging from 200 to 300 minutes. Additionally, there is an absence of students with a cumulative GPA lower than 3.0 and a term GPA below 2.75 within the group of students who slept for over 500 minutes. This contrasts significantly with those who slept between 200 and 300 minutes, where GPAs below 2.0 are evident.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;In summary, based on these visual representations and our exploratory data analysis (EDA), it appears reasonable to assert a positive correlation between sleep duration and GPA, although the relationship is not purely linear and exhibits nuances influenced by the specific duration of sleep.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Check for missing values and store in a data frame
+missingValues <- data.frame(
+  Variable = c("TotalSleepTime", "midpoint_sleep", "cum_gpa", "term_gpa"),
+  Missing_Values = c(sum(is.na(data$TotalSleepTime)),
+                     sum(is.na(data$midpoint_sleep)),
+                     sum(is.na(data$cum_gpa)),
+                     sum(is.na(data$term_gpa)))
+)
+
+# Compute correlation coefficients and store in a data frame
+correlationData <- data.frame(
+  Variables = c("TotalSleepTime vs. Cumulative GPA", 
+                "Midpoint Sleep vs. Cumulative GPA"),
+  Correlation_Coefficient = c(cor(data$TotalSleepTime, data$cum_gpa),
+                              cor(data$midpoint_sleep, data$cum_gpa))
+)
+# Print the correlation coefficients table
+kable(correlationData, digits = 3, format = "markdown")
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Regarding continuous variables, `TotalSleepTime` provides information about the total nightly sleep time recorded by Fitbits during the study. Summary statistics for these variables reveal important details about your sleep patterns, including measures of central tendency, spread, and distribution.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Similarly, `midpoint_sleep` represents a student's average bedtime, providing insight into their sleep habits and routines. `cum_gpa` refers to the cumulative grade point average of the previous semester, and is the basis of academic ability before studying. On the contrary, `term_gpa` reflects the average of the student's performance during the study period, allowing us to evaluate the academic performance of that particular period. 
+  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Analyzing these univariate EDA statistics and frequency distributions such as ones demonstrated below provides valuable insight into the dataset and provides a comprehensive overview of student characteristics, sleep patterns, and academic performance. These statistical measurements are essential for understanding the dataset, making informed decisions about which variables to include in the regression analysis, and exploring possible relationships between them.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Create histograms and box plots for continuous variables
+plot4 = ggplot(data, aes(x = TotalSleepTime)) +
+  geom_histogram(binwidth = 0.5, fill = "lightblue", color = "black") +
+  labs(title = "Total Sleep Time Histogram", x = "Total Sleep Time (minutes)")
+
+plot5 = ggplot(data, aes(y = TotalSleepTime)) +
+  geom_boxplot(fill = "lightgreen", color = "black") +
+  labs(title = "Total Sleep Time Boxplot")
+
+plot6 = ggplot(data, aes(x = midpoint_sleep)) +
+  geom_histogram(binwidth = 0.5, fill = "lightblue", color = "black") +
+  labs(title = "Midpoint Sleep Histogram", x = "Midpoint Sleep (minutes)")
+
+plot7 = ggplot(data, aes(y = midpoint_sleep)) +
+  geom_boxplot(fill = "lightgreen", color = "black") +
+  labs(title = "Midpoint Sleep Boxplot")
+
+plot8 = ggplot(data, aes(x = cum_gpa)) +
+  geom_histogram(binwidth = 0.1, fill = "lightblue", color = "black") +
+  labs(title = "Cumulative GPA Histogram", x = "Cumulative GPA")
+
+plot9 = ggplot(data, aes(y = cum_gpa)) +
+  geom_boxplot(fill = "lightgreen", color = "black") +
+  labs(title = "Cumulative GPA Boxplot")
+
+plot10 = ggplot(data, aes(x = term_gpa)) +
+  geom_histogram(binwidth = 0.1, fill = "lightblue", color = "black") +
+  labs(title = "Term GPA Histogram", x = "Term GPA")
+
+plottoomany = ggplot(data, aes(y = term_gpa)) +
+  geom_boxplot(fill = "lightgreen", color = "black") +
+  labs(title = "Term GPA Boxplot")
+
+# Combine the plots using grid.arrange
+grid.arrange(plot4, plot5, plot6, plot7, plot8, plot9, plot10, 
+             plottoomany, ncol = 2)
+```
+
+\newpage
+
+#  Methods
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;We begin by leveraging exploratory data analysis (EDA) to speculate and formulate hypotheses, using visual analysis to uncover potential relationships within the data. However, we also employ mathematical and statistical models and analyses to gain a more precise understanding of the relationships that we initially identified through EDA.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;One of our initial steps involves employing a fundamental linear regression model represented as:
+
+**\[ Y = \beta_0 + \beta_1X + \varepsilon \]**
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;We then proceed to create two distinct linear regression models, with Y representing our response variable (in this case, GPA), and X serving as our predictor variable (specifically, TotalSleepTime).
+
+For our analysis, we establish one model for term GPA:
+
+**\[ term\_GPA = \beta_0 + \beta_1 * TotalSleepTime \]**
+
+Additionally, we formulate another model for cumulative GPA:
+
+**\[ Cumulative\_GPA = \beta_0 + \beta_1 * TotalSleepTime \]**
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;In the results section, we utilize the R programming language to determine the values of `beta_0` and `beta_1` for both the `term_GPA` and `cum_GPA` variables.
+
+#  Results
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Utilizing R, we have the capability to formulate the linear models outlined in the methods section. The initial step involves establishing two linear regression models, one associating `term_gpa` with `TotalSleepTime`, and the other connecting `cum_gpa` with `TotalSleepTime`. The following table offers a concise overview of the outcomes derived from these analyses:
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+#Function to generate a summary table for a linear model
+generate_model_summary <- function(model, title) {
+  # Fit the linear model
+  model_fit <- lm(model, data = cmu_sleep)
+  
+  # Generate a summary table
+  summary_table <- summary(model_fit)
+  coefficients <- summary_table$coefficients
+  colnames(coefficients) <- c("Estimate", "Std. Error", "t-value", "P-Value")
+  
+  model_summary <- data.frame(
+    "Variable" = rownames(coefficients),
+    coefficients
+  )
+  
+  # Print the summary table
+  cat(paste("Summary Statistics for", title, "\n"))
+  kable(model_summary, digits = 4, format = "markdown")
+}
+
+# Create and display summary tables for term GPA and cumulative GPA models
+generate_model_summary(term_gpa ~ TotalSleepTime, "termGPAModel")
+generate_model_summary(cum_gpa ~ TotalSleepTime, "CumulativeGPAModel")
+```
+
+Several intriguing observations can be drawn from these models. To begin, we can present both models with their corresponding coefficients:
+
+**\[ term\_GPA = 2.6611 + 0.0020 * TotalSleepTime \]**
+
+**\[ term\_GPA = 3.0883 + 0.0009 * TotalSleepTime \]**
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Upon closer examination of this model, we notice that it feature a positive coefficient for TotalSleepTime, consistent with our observations from the scatterplots. Although these coefficients are notably low, this is anticipated. TotalSleepTime is measured in minutes, and GPA is bounded by a maximum of 4.0. Therefore, each additional minute is expected to result in only a marginal increase in GPA. Extrapolating to hours, this suggests an increase in term_GPA of 0.12 points per hour and an increase in cum_GPA of 0.054 points per hour.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Furthermore, it is pertinent to analyze the p-values associated with both beta terms for term_GPA and cum_GPA (i.e., the intercept and TotalSleepTime coefficients). Notably, all p-values are below 0.05, indicating that they appear to be statistically significant.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Additionally, a prediction model for both  can be conducted to further assess their statistical significance:
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+data <- cmu_sleep
+
+# Split the dataset into a training set and a testing set
+set.seed(123)  # For reproducibility
+trainIndex <- createDataPartition(data$term_gpa, p = 0.7, list = FALSE)
+training_data <- data[trainIndex, ]
+testing_data <- data[-trainIndex, ]
+
+# Train a linear regression model (you can choose another model)
+model <- lm(term_gpa ~ TotalSleepTime + cum_gpa, data = training_data)
+
+# Create a new data frame for prediction with the same predictor variables
+new_dataframe <- data.frame(
+  TotalSleepTime = mean(training_data$TotalSleepTime) - 120,  
+  bedtime_mssd = mean(training_data$bedtime_mssd),
+  midpoint_sleep = mean(training_data$midpoint_sleep),
+  frac_nights_with_data = mean(training_data$frac_nights_with_data),
+  daytime_sleep = mean(training_data$daytime_sleep),
+  cum_gpa = mean(training_data$cum_gpa),
+  demo_firstgen = mean(training_data$demo_firstgen),
+  demo_race = mean(training_data$demo_race),
+  demo_gender = mean(training_data$demo_gender)
+)
+
+# Predict GPA with 2 hours less sleep
+predicted_gpa <- predict(model, newdata = new_dataframe)
+
+# Convert the predicted GPA to a table
+predicted_gpa_table <- data.frame(
+  Variable = "Predicted GPA with 2 Hours Less Sleep",
+  Predicted_GPA = predicted_gpa
+)
+
+# Print the predicted GPA table
+kable(predicted_gpa_table, digits = 3, format = "markdown")
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;What we see is a predictive analysis model of students' GPAs based on the given dataset.  A linear regression model is trained on the training data, utilizing predictor variables such as TotalSleepTime and cum_gpa. Subsequently, a new data frame is created for predicting GPA, where a hypothetical scenario is simulated by reducing sleep time by two hours. The output of the model is a predicted GPA value of 3.309. We can also look at some residuals plots for these models: 
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+data <- cmu_sleep
+termGPAModel <- lm(term_gpa ~ TotalSleepTime, data = cmu_sleep)
+cumGPAModel <- lm(cum_gpa ~ TotalSleepTime, data = cmu_sleep)
+# Function to create a residual plot
+create_residual_plot <- function(model, title, color) {
+  data <- cmu_sleep
+  fitted_values <- fitted(model)
+  residuals_values <- residuals(model)
+  
+  ggplot(data = data, aes(x = fitted_values, y = residuals_values)) +
+    geom_point(color = color) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray2") +
+    labs(title = title, x = "Fitted Values", y = "Residuals")
+}
+
+# Create residual plots for Model 1 and Model 2
+residual_plot_termGPAModel <- create_residual_plot(termGPAModel, 
+                            "Residual Plot for Model 1", "lightblue")
+residual_plot_cumGPAModel <- create_residual_plot(cumGPAModel, 
+                            "Residual Plot for Model 2", "lightpink")
+
+# Combine residual plots into one plot
+grid.arrange(residual_plot_termGPAModel, residual_plot_cumGPAModel, ncol = 2)
+```
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;In both of these plots, an intriguing pattern is observed within the residuals. There appears to be an upper limit, represented by a somewhat linear boundary for the residuals, which is an unconventional observation. Nevertheless, beyond this unusual boundary, there are no conspicuous patterns or significant outlier concerns within the data. Furthermore, it's notable that the data's distribution is relatively centered around the horizontal line at y = 0, implying that the residuals follow a somewhat normal distribution.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;To further examine the relationship, we can superimpose the regression line onto the scatterplots for each of these variables, producing the following graphical representations:
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Function to create a scatter plot with regression line
+create_scatter_plot_with_reg <- function(data, x_var, y_var, model, title) {
+  scatter_plot <- ggplot(data, aes(x = .data[[x_var]], y = .data[[y_var]])) +
+    geom_point() +
+    geom_abline(intercept = coef(model)["(Intercept)"], 
+                slope = coef(model)[[x_var]], color = "gray2") +
+    labs(title = title)
+  return(scatter_plot)
+}
+
+# Create scatter plots with regression lines for term GPA and cumulative GPA
+termPlotWithReg <- create_scatter_plot_with_reg(cmu_sleep, 
+"TotalSleepTime", "term_gpa", termGPAModel, "Sleep Time vs. Semester \n GPA with Regression Line")
+cumPlotWithReg <- create_scatter_plot_with_reg(cmu_sleep, 
+"TotalSleepTime", "cum_gpa", cumGPAModel, "Sleep Time vs. Cumulative \n GPA with Regression Line")
+
+# Combine scatter plots into one plot
+grid.arrange(termPlotWithReg, cumPlotWithReg, ncol = 2)
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;We can now assess the influence of 8 am classes on a student's GPA. To achieve this, we will leverage our regression models to predict the expected outcome for any student who experiences a 2-hour reduction in sleep. This can be accomplished by examining the model's projections of the GPA difference for students who experience a sleep reduction of 120 minutes.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Define the sleep difference
+sleepDiff <- 120
+
+# Calculate the expected GPA effects
+termSleepEffect <- coef(termGPAModel)["TotalSleepTime"] * -sleepDiff
+cumSleepEffect <- coef(cumGPAModel)["TotalSleepTime"] * -sleepDiff
+
+# Create a data frame for the table
+effects_table <- data.frame(
+  "Effect Type" = c("Term GPA Effect", "Cumulative GPA Effect"),
+  "Effect Value (GPA Points)" = c(round(termSleepEffect, 2), round(cumSleepEffect, 2))
+)
+
+# Print the table using knitr
+kable(effects_table, format = "markdown")
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;These computations indicate that the presence of 8 am classes exerts a negative influence on a student's GPA, as per our predictive models. Students are estimated to experience a decrease of 0.24 points in their Term GPA and a decline of 0.11 points in their Cumulative GPA.
+
+\newpage
+
+#  Conclusion
+
+These findings enable us to address the three fundamental questions guiding this research:
+
+1. **Is there an association between sleep time and GPA?**
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Our exploratory data analysis (EDA) reveals substantial evidence supporting the assertion that students who receive less sleep generally tend to have lower GPAs. This conclusion is evident in our EDA scatterplots as well as the positive relationships observed in our linear regression models, which statistically establish a significant correlation between the amount of sleep a student gets and their GPA.
+
+2. **What is the expected impact on average GPA when a student sleeps 2 hours less?**
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Our EDA indicates that students with less sleep typically exhibit lower GPAs. This was statistically confirmed in our results, which quantified that, on average, a 2-hour reduction in sleep corresponds to a decrease of 0.24 points in a student's term GPA and a 0.11 point reduction in their cumulative GPA.
+
+3. **Can we attribute changes in GPA solely to insufficient sleep?**
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Our analysis suggests that sleep does influence a student's GPA, although it may not be the sole determining factor. Further exploration is required to assess the potential influence of other factors, such as study habits or personal characteristics (e.g., first-generation status, gender, age, etc.), on a student's GPA. Nevertheless, based on this analysis, it is reasonable to conclude that sleep is one of the factors affecting GPA.
+
+**Limitations:**
+This report exclusively examines the total amount of sleep students receive and its specific impact on GPA. It does not account for other life factors or individual characteristics that might also influence GPA. Additionally, the data collection method involved students wearing Fitbits, making it susceptible to inaccuracies. Factors like a Fitbit dying during the night or students removing it for a nap could compromise data accuracy and, consequently, the reliability of the report's results. To mitigate these limitations in future studies, it would be advisable to analyze other variables and factors that could impact a student's GPA, allowing for a more comprehensive understanding of the potential causal relationship between sleep and GPA.
+
+**Recommendations:**
+Based on the findings, it is apparent that scheduling 8 a.m. classes, while accommodating logistical constraints and curriculum requirements, adversely affects students' academic performance. On average, 8 a.m. classes are associated with a reduction of 0.24 points in a student's term GPA and a 0.11-point decline in their cumulative GPA. This suggests that not only do students tend to perform poorly in their early-morning classes, but their overall academic performance is also adversely affected. Consequently, implementing 8 a.m. classes may not be the most favorable solution.
+
+
