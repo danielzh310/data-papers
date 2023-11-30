@@ -1,0 +1,398 @@
+---
+title: "Decoding Academic Quality: An In-depth Analysis of Instructor Evaluations and Promotion Factors"
+author: "Daniel Zhu"
+date: "November 11th, 2023"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(gridExtra)
+library(alr4)
+library(regressinator)
+library(modelsummary)
+library(broom)
+library(lmtest)
+library(knitr)
+library(caret)
+library(dplyr)
+```
+
+```{r, include = FALSE}
+#numerical variable helper
+numericSummaryTable <- function(variables, data) {
+  summaryStats <- data.frame(
+    Mean = sapply(variables, function(var) mean(data[[var]])),
+    Median = sapply(variables, function(var) median(data[[var]])),
+    
+    Min = sapply(variables, function(var) min(data[[var]])),
+    Max = sapply(variables, function(var) max(data[[var]])),
+    
+    Q1 = sapply(variables, function(var) quantile(data[[var]], 0.25)),
+    Q3 = sapply(variables, function(var) quantile(data[[var]], 0.75))
+  )
+  return(summaryStats)
+}
+```
+
+```{r, include = FALSE}
+#factor variable info helper
+factorSummaryTable <- function(factors, data) {
+  summaryStats <- data.frame(
+    Factor = factors,
+    Levels = sapply(factors, function(factorVar)
+      paste(levels(data[[factorVar]]), collapse = ", "))
+  )
+  return(summaryStats)
+}
+```
+
+```{r, include = FALSE}
+#model summary helper
+modelSummaryTable <- function(model) {
+  summaryModel <- summary(model)
+  coefficients <- summaryModel$coefficients
+  colnames(coefficients) <- c("Estimate", "Std. Error", 
+                              "t-value", "P-Value")
+  
+  table <- data.frame(
+    "Variable" = rownames(coefficients),
+    coefficients
+  )
+  return(table)
+}
+```
+
+# Introduction
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Academic institutions aim to provide exceptional education, and to fulfill this goal, colleges and universities endeavor to present a wide range of courses that cater to the changing interests of students. They allocate resources to create conducive learning environments and aim to uphold a rigorous standard for their teaching staff. Assessing the effectiveness of professors, instructors, and teaching assistants (TAs), though, poses a formidable challenge when it comes to numerical quantification.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;To tackle this difficulty, institutions like Carnegie Mellon University employ Faculty Course Evaluations (FCEs), and external platforms such as ratemyprofessors.com compile student reviews and professor-related details. Nevertheless, the collection of data through these approaches is contingent on voluntary participation, relying on students opting to take part. The voluntary nature of this data collection introduces potential biases, complicating its generalization and practical utility of the data.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;In pursuit of this goal, the study utilizes the Rateprof dataset from the alr4 package, which encompasses student ratings of 364 instructors at The University of Southern North Dakota at Hoople during the 2011 academic year. Key variables in the dataset encompass `quality` (Average Quality), `gender` (Male/Female), `pepper` (utilized to assess instructor Attractiveness), `easiness` (Course Difficulty), and `discipline` (Topic taught by the professor). The paper endeavors to investigate whether these evaluations introduce biases and if they can offer insights for promotion decisions. 
+
+The primary focus will be on the following research questions:
+
+### 1. Is there a correlation between an instructor's quality rating and their gender, attractiveness, course easiness, or discipline?
+
+### 2. Does the correlation between easiness and quality rating vary based on the instructor's gender and discipline?
+
+### 3. How do statistically significant relationships among predictors influence the quality ratings assigned by students?
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The initial phase of the analysis involves both univariate and bivariate Exploratory Data Analysis (EDA) to comprehend the relationships among variables. Subsequently, the study constructs models to quantify the statistical significance of observed relationships. Through this analysis, the findings reveal the regression models analyze factors influencing instructor quality ratings, including easiness, gender, and attractiveness (pepper). Three models are presented: easiness-only, full model without pepper, and complete model. Easiness consistently shows a positive relationship with quality. Using AIC values, a streamlined model without discipline variables is derived, revealing significant predictors.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ANOVA tests confirm the impact of easiness, gender, and pepper on quality ratings, while discipline lacks significance. Tukey's post hoc test for discipline reinforces no significant differences between disciplines. Another ANOVA test indicates that easiness and gender significantly affect the quality-easiness relationship, while discipline does not. In summary, easiness and gender play key roles in quality ratings, with attractiveness contributing in the complete model. A t-test on the refined model emphasizes the significance of easiness, gender, and attractiveness in influencing instructor quality ratings. Notably, an increase in easiness, having a male instructor, and perceived attractiveness all correlate with higher quality ratings.
+
+# Exploratory Data Analysis & Data Summary
+
+## Univariate EDA
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;We can initiate the analysis by examining each variable individually to gain insights into their distributions, employing Univariate Exploratory Data Analysis (EDA). 
+
+```{r, silent=TRUE}
+factorVariables <- c("gender", "pepper", "discipline")
+Rateprof <- Rateprof %>%
+  mutate(across(all_of(factorVariables), as.numeric, .names = "{col}Num"))
+
+# Define numeric and factor variables
+numericVariables <- c("quality", "easiness", "genderNum", 
+                      "pepperNum", "disciplineNum")
+factorVariables <- c("gender", "pepper", "discipline")
+
+nTable <- numericSummaryTable(numericVariables, Rateprof)
+fTable <- factorSummaryTable(factorVariables, Rateprof)
+
+kable(nTable, digits = 2, format = "markdown")
+kable(fTable, digits = 2, format = "markdown")
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;For the variable `quality`, instructors, on average, receive a rating of 3.58, with ratings ranging from a minimum of 1.41 to a maximum of 4.98. The `easiness` ratings, on the other hand, have an average of 3.14, spanning from a minimum of 1.39 to a maximum of 4.90.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Moving on to our first categorical factor, `gender`, the average value is 1.57, indicating a predominance of male instructors. Exploring the `pepper` factor, the average rating is 1.13, suggesting that the majority of instructors were not perceived as attractive by their students. In terms of `disciplines`, Humanities and Social Science instructors outnumber those from other disciplines, with an average value of 2.26 and a median of 2.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Now we'll take a look at our graphical analysis, histograms and boxplots are generated for our numerical variables, specifically `quality` (our response variable) and `easiness` (one of our predictors).
+
+```{r, silent=TRUE}
+# Histogram for quality
+histQuality <- Rateprof %>% 
+  ggplot(aes(x = quality)) + geom_histogram(bins = 30, fill = "lightblue", 
+                 color = "black", alpha = 0.75) +
+  labs(title = "Histogram of Quality", x = "Quality", y = "Frequency")
+
+#Histogram for easiness
+histEasiness <- Rateprof %>%
+  ggplot(aes(x = easiness)) + geom_histogram(bins = 30, fill = "lightpink", 
+                 color = "black", alpha = 0.75) +
+  labs(title = "Histogram of Easiness", x = "Easiness", y = "Frequency")
+
+#Boxplot for quality
+boxQuality <- Rateprof %>%
+  ggplot(aes(y = quality)) + geom_boxplot(fill = "lightblue", 
+                                          color = "black") +
+  labs(title = "Boxplot for Quality", y = "Quality Rating")
+
+#Boxplot for easiness
+boxEasiness <- Rateprof %>% 
+  ggplot(aes(y = easiness)) + geom_boxplot(fill = "lightpink", 
+                                           color = "black") + 
+  labs(title = "Boxplot for Easiness ", y = "Difficulty Rating")
+
+grid.arrange(histQuality, histEasiness, boxQuality, boxEasiness, ncol = 2)
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;After examining the histograms, it is evident that our response variable, `quality`, displays a unimodal distribution with a slight left skew, centered around 3.5. Similarly, the histogram for `easiness` indicates a unimodal and relatively normal distribution, centered around 3 with no noticeable skew.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;These findings are corroborated by our boxplots, revealing that the distribution of `quality` is roughly centered at 3.6, with an upper quartile of 4.25 and a lower quartile around 2.9. For `easiness`, the center is around 3.25, with an upper quartile of approximately 3.75 and a lower quartile around 2.6.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;To obtain a comprehensive understanding of the distributions and characteristics of our factor variables, our focus will now shift to exploring boxplots:
+
+```{r}
+boxGender <- ggplot(Rateprof, aes(x = gender, y = quality)) + 
+  geom_boxplot(fill = "lightpink", color = "black") + 
+  labs(title = "Quality by Gender", 
+       x = "Gender", y = "Quality")
+
+boxPepper <- ggplot(Rateprof, aes(x = pepper, y = quality)) +
+  geom_boxplot(fill = "grey", color = "black") +
+  labs(title = "Quality by Attractiveness", 
+       x = "Attractive", y = "Quality")
+
+boxDiscipline <- ggplot(Rateprof, aes(x = discipline, y = quality)) +
+  geom_boxplot(fill = "lightblue", color = "black") +
+  labs(title = "Quality by Discipline", 
+       x = "Discipline", y = "Quality")
+
+grid.arrange(boxGender, boxPepper, boxDiscipline, ncol = 3)
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Let's begin by examining the `gender` boxplot, where we observe a generally minor difference between male and female instructors. The average `quality` ratings are within a 0.1 range, and the lower and upper quartiles exhibit similar patterns. Shifting our focus to the `pepper` variable for attractiveness, it becomes evident that when students perceive their instructor as attractive, the average `quality` rating is nearly 1 point higher compared to instructors perceived as unattractive. Notably, the lowest quality rating for an attractive instructor is around 3.5, whereas for unattractive instructors, it is 1.5. Additionally, there is no overlap between the upper third and lower first quartiles for non-attractive and attractive-rated instructors, respectively.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Turning to the `discipline` variable, we observe that Social Science instructors boast the highest average `quality` rating, while Humanities and STEM instructors show relatively similar `quality` values. Although the highest scores for all disciplines are quite comparable, as are the upper third quartile values, STEM instructors have the lowest first quartile compared to instructors from other disciplines.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Based on these observations, it appears there might be a substantial correlation between the attractiveness of an instructor and their quality rating. Conversely, the relationship between gender, discipline, and quality may not be as pronounced. Further exploration through bivariate analysis and subsequent statistical tests in this report will provide a more in-depth understanding of these dynamics.
+
+## Bivariate EDA
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Let's proceed with a targeted Bivariate Exploratory Data Analysis (EDA) to delve deeper into the initial relationships among our variables of interest. To achieve this, we'll create essential scatterplots. Initially, we'll plot Quality against Easiness independently. Subsequently, we'll facet that plot using each of our factor variables to explore whether they might contribute to any discernible relationships.
+
+```{r, fig.width=8,fig.height=4}
+# Create a base plot examining quality and easiness
+easinessPlot <- Rateprof %>%
+  ggplot(aes(x = quality, y = easiness)) +
+  geom_point(col = "red", size = 1.5) +
+  labs(x = "Quality", y = "Easiness") +
+  ggtitle("Quality vs. Easiness")
+
+easinessPlot
+```
+
+```{r}
+#Make a faceted scatterplot
+createFacetedScatterplot <- function(data, title, color, facetVar) {
+  ggplot(data, aes(x = quality, y = easiness)) +
+    geom_point(col = color, size = 1.2) +
+    labs(x = "Quality", y = "Easiness") +
+    ggtitle(title) +
+    facet_wrap(~get(facetVar), scales = "free")
+}
+
+genderPlot <- createFacetedScatterplot(Rateprof, 
+              "Quality vs. Easiness (Gender)", "blue", "gender")
+pepperPlot <- createFacetedScatterplot(Rateprof, 
+              "Quality vs. Easiness (Attractiveness)", 
+              "green", "pepper")
+
+grid.arrange(genderPlot, pepperPlot, ncol = 2)
+```
+
+```{r}
+discPlot <- createFacetedScatterplot(Rateprof, 
+              "Quality vs. Easiness (Discipline)", 
+              "red", "discipline")
+discPlot
+```
+
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Upon examining our scatterplots, intriguing patterns emerge. In the non-faceted scatterplot, there appears to be a reasonably linear, positive association between the quality rating and the easiness of an instructor's course. Broadly speaking, instructors with lower quality ratings seem to teach more challenging classes, as indicated by lower easiness scores. Conversely, a substantial number of instructors with high quality ratings appear to be associated with easier classes.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;In our faceted scatterplots, this general trend persists, with one notable exception concerning attractiveness. For instructors rated as not attractive, there is a distinct positive relationship. However, for those rated as attractive, the relationship is less distinct. In this case, instructors rated as attractive display a broader range of qualities, teaching both easier and more difficult courses.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;In the discipline-specific plot, the positive linear relationship for Social Science instructors and Pre-professors is less apparent. This suggests that, for these disciplines, the relationship may be less robust. Nonetheless, across the remaining faceted plots, a consistently strong, positive, and linear relationship is evident. This implies that certain factors might indeed influence the connection between easiness and quality.
+
+# Methods
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;We can now establish several linear models based on the relationships identified through Exploratory Data Analysis (EDA), structured as:
+
+**\[ Y = \beta_0 + \beta_1 \cdot X_1 + \beta_2 \cdot  X_2 + \beta_3 \cdot  X_3 + \beta_4 \cdot X_4 + \varepsilon \]**
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Given our primary interest in four key variables, this model serves as a solid starting point. However, due to the presence of factors, particularly the `discipline` variable introducing multiple $\beta$ values, the comprehensive model includes terms such as:
+
+**\[ \text{quality} = \beta_0 + \beta_1 \cdot \text{easiness} + \beta_2 \cdot \text{gender}_{\text{male}} + \beta_3 \cdot \text{pepper}_{\text{yes}} + \beta_4 \cdot \text{discipline}_{\text{SocSci}} + \\ \beta_5 \cdot \text{discipline}_{\text{STEM}} + \beta_6 \cdot \text{discipline}_{\text{Pre-prof}} \]**
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;To address our research questions, we define supplementary equations. The first focuses solely on the relationship between `quality` and `easiness`:
+
+**\[ \text{quality} = \beta_0 + \beta_1 \cdot \text{easiness} \]**
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The second incorporates `easiness`, `gender`, and `discipline` as predictors of `quality`:
+
+**\[ \text{quality} = \beta_0 + \beta_1 \cdot \text{easiness} + \beta_2 \cdot \text{gender}_{\text{male}} + \beta_3 \cdot \text{discipline}_{\text{SocSci}} + \\ \beta_4 \cdot \text{discipline}_{\text{STEM}} + \beta_5 \cdot \text{discipline}_{\text{Pre-prof}} \]**
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;In the results section, we will employ R to define the $\beta$ parameters for these models. Leveraging filtering techniques and hypothesis testing, we aim to discern the extent to which our predictors impact the quality ratings assigned to instructors.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;It's important to note a limitation of the regression method – despite filtering techniques, the generated model may not fit the data well, as our data might adhere to a different relationship (e.g., quadratic, logistic, exponential). Hence, in our results, we must remain vigilant for potential poor fits, recognizing that even if the model fits poorly, there may still be a meaningful relationship among our parameters.
+
+# Results
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;We are ready to actualize the models outlined earlier. Let's commence by formulating all three models for subsequent analysis.
+
+```{r}
+fullModel <- lm(quality ~ easiness + gender + pepper 
+                 + discipline, data = Rateprof)
+easinessModel <- lm(quality ~ easiness, data = Rateprof)
+woPepperModel <- lm(quality ~ easiness + gender 
+                 + discipline, data = Rateprof)
+
+fullTable <- modelSummaryTable(fullModel)
+easinessTable <- modelSummaryTable(easinessModel)
+woPepperTable <- modelSummaryTable(woPepperModel)
+
+cat("Summary Statistics: Full Model")
+kable(fullTable, digits = 3, format = "markdown")
+cat("Summary Statistics: Simple Model")
+kable(easinessTable, digits = 3, format = "markdown")
+cat("Summary Statistics: Full Model w/o Pepper")
+kable(woPepperTable, digits = 3, format = "markdown")
+```
+
+We observe intriguing insights from these regression models, we get these equations:
+
+Easiness: **\[ \text{quality} = 1.6670 + 0.6086 \cdot \text{easiness} \]**
+
+Full Model: **\[ \text{quality} = 1.5788 + 0.5684 \cdot \text{easiness} + 0.1447 \cdot \text{gender}_{\text{male}} + 0.6553 \cdot \text{pepper}_{\text{yes}} +\]** 
+**\[\\ 0.0324 \cdot \text{discipline}_{\text{SocSci}} + 0.1709 \cdot \text{discipline}_{\text{STEM}} - 0.0231 \cdot \text{discipline}_{\text{Pre-prof}} \]**
+
+Full Model without Pepper: **\[ \text{quality} = 1.4845 + 0.6339 \cdot \text{easiness} + 0.1396 \cdot \text{gender}_{\text{male}} - \\ 0.0041 \cdot\]** **\[\text{discipline}_{\text{SocSci}} + 0.1191 \cdot \text{discipline}_{\text{STEM}} - 0.0502 \cdot \text{discipline}_{\text{Pre-prof}} \]**
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;In the easiness-only model, all coefficients have p-values much lower than 0.05, indicating a positive linear relationship between `quality` and `easiness.` Examining the model without attractiveness (`pepper` variable), the p-values reveal that `easiness` is the only statistically significant predictor, with `gender` and all `discipline` parameters having p-values over 0.05. For the complete model, the `gender` and `pepper` parameters are statistically significant, while the `discipline` p-values remain above 0.05. This suggests that `discipline` may not significantly impact quality ratings. To validate this, we will first employ AIC values as a filtering technique and subsequently conduct hypothesis testing.
+
+Using AIC values, the resulting filtered model is as follows:
+
+```{r, silent=TRUE, echo=TRUE, warning=FALSE, message=FALSE,include=FALSE}
+finalModel <- step(fullModel, direction = "both")
+reducedTable <- modelSummaryTable(finalModel)
+```
+
+```{r}
+cat("Summary Statistics: Simple Model")
+kable(easinessTable, digits = 4, format = "markdown")
+cat("Summary Statistics: Filtered Model")
+kable(reducedTable, digits = 4, format = "markdown")
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Utilizing AIC values for optimization, we arrive at a streamlined model that excludes all discipline variables. Notably, all the remaining parameters in this trimmed model exhibit p-values below 0.05, signifying their statistical significance. With our easiness-only model, full model without pepper, and the refined model in hand, we can proceed to conduct targeted statistical tests and analyses to address our initial set of three research questions.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Let's initiate our exploration of the first question by conducting an ANOVA test to identify statistically significant values within our full model.
+
+```{r}
+# Perform ANOVA for the full model
+anovaTestFull <- aov(quality ~ easiness + gender + pepper + discipline, 
+                     data = Rateprof)
+anova_summary <- as.data.frame(anova(anovaTestFull))
+kable(anova_summary, digits = 4, format = "markdown")
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;From the outcomes of our initial test, several observations emerge. Examining each variable, we observe that the test encompassed six parameters. This breakdown comprises three parameters each for easiness, gender, and pepper, each contributing one degree of freedom. Additionally, three parameters are allocated to discipline, resulting in three degrees of freedom for this factor. Considering the entire dataset, which contains 366 data points, the ANOVA test yields 359 degrees of freedom, as evidenced by the residuals.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;We observe that the ANOVA test results indicate a highly significant model (\( F = 189.855, p < 2 \times 10^{-16} \)). This suggests that at least one of the predictor variables (easiness, gender, pepper, discipline) significantly influences the quality rating. Delving into the individual predictors, we find that easiness (\( F = 189.855, p < 2 \times 10^{-16} \)), gender (\( F = 5.401, p = 0.0207 \)), and pepper (\( F = 35.571, p = 5.89 \times 10^{-09} \)) all have p-values below 0.05, signifying their significant impact. However, discipline (\( F = 1.556, p = 0.1998 \)) does not show a statistically significant effect on quality ratings.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;To gain a deeper understanding, we can explore post hoc tests, such as Tukey's post hoc test for discipline. This additional analysis may reveal specific differences between disciplines, contributing to a more nuanced interpretation of the factors influencing quality ratings.
+
+```{r}
+# Perform a post hoc test
+disciplinePosthoc <- TukeyHSD(anovaTestFull, "discipline")
+
+phocResults <- as.data.frame(disciplinePosthoc$discipline)
+kable(phocResults, digits = 4, format = "markdown")
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;This Tukey's post hoc test output is comparing the mean differences in the `quality` ratings among different levels of the `discipline` variable. The output provides confidence intervals and adjusted p-values for pairwise comparisons between each discipline level. We see that:
+
+- **SocSci-Hum:** The mean difference in `quality` ratings between Social Science (SocSci) and Humanities (Hum) is 0.032. The confidence interval (-0.222, 0.287) includes zero, and the adjusted p-value is 0.9879, suggesting no statistically significant difference in `quality` ratings between these two disciplines.
+
+- **STEM-Hum:** The mean difference in `quality` ratings between STEM and Humanities is 0.155. The confidence interval (-0.066, 0.377) includes zero, and the adjusted p-value is 0.27, indicating no statistically significant difference in `quality` ratings between STEM and Humanities.
+
+- **Pre-prof-Hum:** The mean difference in `quality` ratings between Pre-professional and Humanities is -0.023. The confidence interval (-0.282, 0.235) includes zero, and the adjusted p-value is 0.995, indicating no statistically significant difference in `quality` ratings between Pre-professional and Humanities.
+
+- **STEM-SocSci:** The mean difference in `quality` ratings between STEM and Social Science is 0.123. The confidence interval (-0.143, 0.39) includes zero, and the adjusted p-value is 0.631, suggesting no statistically significant difference in `quality` ratings between STEM and Social Science.
+
+- **Pre-prof-SocSci:** The mean difference in `quality` ratings between Pre-professional and Social Science is -0.055. The confidence interval (-0.354, 0.242) includes zero, and the adjusted p-value is 0.963, indicating no statistically significant difference in `quality` ratings between Pre-professional and Social Science.
+
+- **Pre-prof-STEM:** The mean difference in `quality` ratings between Pre-professional and STEM is -0.179. The confidence interval (-0.45, 0.091) includes zero, and the adjusted p-value is 0.321, suggesting no statistically significant difference in `quality` ratings between Pre-professional and STEM.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;In summary, based on these comparisons, there are no statistically significant differences in `quality` ratings between the different disciplines.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;We an then conduct an Anova test to see if `gender` or `discipline` have an impact on the relationship between `quality` and `easiness.`
+
+```{r}
+# Perform ANOVA for the second model
+anovaQ2 <- aov(quality ~ easiness + gender + discipline, data = Rateprof)
+
+anovaTable <- as.data.frame(anova(anovaQ2))
+kable(anovaTable, format = "markdown")
+```
+
+Analyzing the ANOVA table output we can come to the conclusion that:
+
+
+1. **Easiness (F value = 172.5, p < 0.001):**
+   - The variable `easiness` has a highly significant impact on the relationship between `quality` and `easiness`. The F value of 172.5 with a p-value less than 0.001 indicates a significant overall effect.
+
+2. **Gender (F value = 4.91, p = 0.027):**
+   - The variable `gender` also shows a significant impact on the relationship. Although the effect is less pronounced than easiness, the F value of 4.91 with a p-value of 0.0274 indicates statistical significance.
+
+3. **Discipline (F value = 0.91, p = 0.435):**
+   - The variable `discipline` does not appear to have a significant impact on the relationship between `quality` and `easiness`. The F value is 0.91 with a p-value of 0.4351, suggesting that the differences observed are likely due to random variation.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The results suggest that both `easiness` and `gender` significantly influence the relationship between `quality` and `easiness`, while `discipline` does not show a statistically significant impact. These findings provide valuable insights into the factors affecting the perceived quality of instructors in relation to the easiness of their courses, with gender playing a discernible role in the observed relationship.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;We can now employ our refined model and conduct a t-test to gain qualitative insights into the extent to which our statistically significant predictors impact an instructor's quality rating.
+
+```{r}
+# t-test for each coefficient in the full model
+tTest <- summary(fullModel)$coefficients[, c("Estimate", 
+"Std. Error", "Pr(>|t|)", "t value")]
+
+# t-test for each coefficient in the final model
+tTest_final <- summary(finalModel)$coefficients[, c("Estimate", 
+"Std. Error", "Pr(>|t|)", "t value")]
+
+cat("T-Test: Full Model")
+kable(tTest, digits = 3, format = "markdown")
+cat("T-Test:Trimmed Model")
+kable(tTest_final, digits = 3, format = "markdown")
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;According to these findings, we can conclude that among the variables of interest, easiness, gender, and attractiveness significantly influence an instructor's quality rating. More specifically, an increase of one point in the easiness scale corresponds to an expected rise of approximately 0.56 points in the quality rating. Likewise, having a male instructor is associated with an increase of around 0.14 in the quality score, and perceiving the professor as attractive is linked to an anticipated boost of approximately 0.66 in the instructor's quality rating.
+
+# Conclusion
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;With these results, we can look back and answer the three guiding questions for this research:
+
+### 1. Is there a correlation between an instructor's quality rating and their gender, attractiveness, course easiness, or discipline?
+**Answer:** Yes, there is a correlation between an instructor's quality rating and several factors. Easiness, gender, and attractiveness (pepper variable) have been identified as significant predictors. However, discipline does not seem to have a statistically significant impact on quality ratings.
+
+### 2. Does the correlation between easiness and quality rating vary based on the instructor's gender and discipline?
+**Answer:** Yes, the correlation between easiness and quality rating does vary based on the instructor's gender and discipline. Easiness has a significant impact on quality ratings, and this relationship is influenced by gender. Additionally, discipline does not show a significant effect on the relationship between easiness and quality.
+
+### 3. How do statistically significant relationships among predictors influence the quality ratings assigned by students?
+**Answer:** The statistically significant predictors, namely easiness, gender, and attractiveness, significantly influence the quality ratings assigned by students. An increase in easiness is associated with a rise in quality ratings. Having a male instructor and perceiving the instructor as attractive also contribute to higher quality ratings.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;It's crucial to acknowledge certain limitations in this study. The data might be subject to biases, as it relies on student perceptions, and these perceptions can vary based on individual experiences and expectations. Additionally, external factors not considered in this analysis could impact quality ratings. The study is also limited to the specific context and discipline categories used. Based on the findings, it is recommended to further explore the nuanced relationships between gender, easiness, and quality ratings. Conducting qualitative research to understand student perspectives and experiences could provide deeper insights. Additionally, considering factors beyond the ones explored in this study, such as teaching style and communication skills, could contribute to a more comprehensive understanding of the factors influencing instructor quality ratings.
+
