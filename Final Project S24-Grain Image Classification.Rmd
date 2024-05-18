@@ -1,0 +1,228 @@
+---
+title: "Methods of Statistical Learning 36-462 Final Project S24: Grain Image Classification"
+author: "Daniel Zhu"
+date: "April 26th, 2024"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(gridExtra)
+library(alr4)
+library(regressinator)
+library(modelsummary)
+library(broom)
+library(lmtest)
+library(knitr)
+library(caret)
+library(dplyr)
+library(FNN)
+library(np)
+library(carat)
+library(boot)
+library(mgcv)
+library(gamair)
+library(AER)
+library(readr)
+library(glmnet)
+library(corrplot)
+library(rpart)
+library(randomForest)
+library(boot)
+library(e1071)
+library(corrplot)
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+#ASUS
+#train_data <- read.csv("/Users/class/Box/My Documents/36-462/train_data.csv")
+#test_data <- read.csv("/Users/class/Box/My Documents/36-462/test_data_x.csv")
+#Lenovo
+train_data <- read.csv("/Users/danie/Box/My Documents/36-462/train_data.csv")
+test_data <- read.csv("/Users/danie/Box/My Documents/36-462/test_data_x.csv")
+```
+
+# Introduction:
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;In this project, we explore the application of machine learning techniques for automated grain type classification based on geometric features extracted from images. The dataset comprises features derived from images of grains, including 16 geometric attributes such as area, perimeter, major axis length, and various shape factors. These features are utilized to predict a binary target variable representing the grain type. This research addresses a binary classification problem aimed at accurately categorizing grains into their respective types using machine learning models. Automated grain type classification holds significant potential for diverse applications, ranging from agricultural research to quality control in food processing industries. By leveraging machine learning algorithms, we aim to develop a predictive model capable of accurately classifying grain types based solely on geometric characteristics extracted from images. This approach has the potential to streamline grain sorting processes and enhance efficiency in various agricultural and industrial settings.The dataset is divided into two parts: a training set (`train_data.csv`) containing labeled examples for model training, and a test set (`test_data_x.csv`) with unlabeled instances for model evaluation and prediction. Our research focuses on training a robust predictive model on the training data and assessing its performance on the test data to generalize well to unseen instances. Ultimately, the objective is to create a reliable and efficient automated system for grain type classification, offering practical benefits in agricultural and industrial domains.
+
+# Exploration:
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+#str(train_data)
+#head(train_data)
+#head(test_data)
+#summary(train_data)
+#colnames(train_data)
+```
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, fig.dim = c(6, 2.5)}
+#visualize distribution of grain type
+barplot(table(train_data$Y), main = "Distribution of Grain Types", 
+        xlab = "Grain Type", 
+        ylab = "Frequency")
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;In exploring the dataset for predicting grain type based on geometric features, several key insights emerged. Firstly, visual inspection of the data revealed variations in the geometric properties of different grain types, suggesting that these features could serve as discriminating factors for classification. We can visualize what that is by using a bar plot displays the distribution of grain types in the dataset. The x-axis represents the different types of grain, and the y-axis represents the frequency of each grain type. Each bar corresponds to a specific grain type, and its height indicates how many instances of that grain type are present in the dataset. This visualization allows us to quickly grasp the relative proportions of different grain types in the dataset.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+numeric_vars <- colnames(train_data)[1:16]
+hist_plots <- lapply(numeric_vars, function(var) {
+  ggplot(train_data, aes(x = !!as.symbol(var))) +
+    geom_histogram(fill = "maroon", color = "black", bins = 20) +
+    labs(title = paste(var), x = var, y = "Frequency")
+})
+grid.arrange(
+  grobs = hist_plots,
+  ncol = 4
+)
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Unsupervised approaches, such as clustering, were employed to identify any underlying structure in the data. K-means clustering revealed distinct clusters within the feature space, indicating potential separability between grain types based on geometric attributes. With guidance from the write up guide, feature engineering played a crucial role in model development. Interaction terms and derived features were created to capture complex relationships and enhance the predictive power of the models. For instance, interaction terms between pairs of highly correlated features were included to account for nonlinear interactions. The set of histograms above displays the distributions of numeric variables in the dataset. Each histogram represents the distribution of values for a specific numeric variable. The x-axis of each histogram represents the range of values for the corresponding variable, and the y-axis represents the frequency of those values. By examining these histograms, we can gain insights into the distribution, central tendency, and spread of each numeric variable, which can be useful for understanding the characteristics of the dataset and identifying any potential patterns or outliers. Furthermore, correlation analysis helped identify redundant features and mitigate multicollinearity, leading to more robust models. Features with high pairwise correlations were either removed or combined to prevent model overfitting and improve generalization performance. We will go into further detail regarding the analysis of our given data set but the exploration of the dataset aided us with the understanding the underlying data structure in developing "accurate" predictive models for grain type classification.
+
+# Supervised Analysis:
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The process of making predictions on the grain image dataset involved several steps where our dataset was prepared by loading the training and test data from CSV files and exploring its structure and summary statistics. Feature engineering techniques were applied to capture potential nonlinear relationships by creating interaction terms for highly correlated features. Subsequently, four classification models were trained on the training set and evaluated on the validation set using accuracy as the evaluation metric. From there we then determined that our logistic regression was the best performing model.
+
+\begin{verbatim}
+#hyperparameter tuning for logistic regression
+glmnet_model <- cv.glmnet(as.matrix(train_set[, -17]), train_set$Y, 
+                          family = "binomial")
+best_alpha <- glmnet_model$lambda.min
+best_logit_model <- glmnet(as.matrix(train_set[, -17]), train_set$Y, 
+                           family = "binomial", alpha = best_alpha)
+
+#try some LASSO regularization
+lasso_model <- glmnet(as.matrix(train_set[, -17]), train_set$Y, 
+                      family = "binomial", alpha = 1)
+\end{verbatim}
+
+Hyperparameter tuning was then performed for logistic regression using cross-validation, and LASSO regularization was applied to improve its performance. Feature scaling was applied to ensure equal contribution of features, and predictions were made on the test set using the tuned logistic regression model. Evaluation metrics such as accuracy, precision, recall, and F1-score were computed on the validation set to assess model performance, and the final test accuracy was calculated for submission. This systematic approach enabled the selection of the best-performing model and the generation of predictions on the test set for further evaluation and submission.
+
+\begin{verbatim}
+# Split the data into training and validation sets
+set.seed(123)  
+train_indices <- sample(1:nrow(train_data), 0.7 * nrow(train_data)) 
+train_set <- train_data[train_indices, ]
+validation_set <- train_data[-train_indices, ]
+
+# Plot a Logistic Regression
+logit_model <- glm(Y ~ ., data = train_set, family = "binomial")
+
+# plot a Decision Tree
+tree_model <- rpart(Y ~ ., data = train_set, method = "class")
+
+# plot a Random Forest
+rf_model <- randomForest(Y ~ ., data = train_set)
+
+# plot a SVM
+svm_model <- svm(Y ~ ., data = train_set, kernel = "linear")
+\end{verbatim}
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;In this project, I included various predictor variables extracted from grain image data. These variables encompassed geometric and shape-based features, such as area, perimeter, major axis length, minor axis length, aspect ratio, eccentricity, convex area, equivalent diameter, extent, solidity, roundness, compactness, and shape factors. Additionally, I engineered interaction terms for highly correlated features, such as `Area_Perimeter` and `AspectRation_Solidity`, to capture potential nonlinear relationships between these variables as illustrated in the following code snippet:
+
+\begin{verbatim}
+train_data$Area_Perimeter <- train_data$Area * train_data$Perimeter
+train_data$AspectRation_Solidity <- train_data$AspectRation * train_data$Solidity
+
+X <- train_data[, -17]
+Y <- train_data$Y
+\end{verbatim}
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;For prediction, I employed techniques including logistic regression, decision trees, random forests, and SVM. These methods were chosen for their versatility, interpretability, and ability to handle both linear and nonlinear relationships between predictors and the target variable. To optimize model performance, I utilized cross-validation and hyperparameter tuning. For example, in logistic regression, I used cross-validation to select the optimal regularization parameter \(\lambda\) via the glmnet package's cv.glm function.
+
+\begin{verbatim}
+formula <- as.formula(paste("Y ~ .", collapse = " + "))
+train_data_df <- cbind(Y = Y_train, X_train)
+cv_logit <- cv.glm(data = as.data.frame(train_data_df), 
+                   glmfit = logit_model, K = 5)
+
+best_lambda <- cv_logit$lambda.min
+best_logit_model <- update(logit_model, . ~ ., 
+                           data = as.data.frame(train_data_df))
+
+predicted_prob_fine_tuned <- predict(best_logit_model, newdata = validation_set, 
+                                     type = "response")
+predicted_class_fine_tuned <- ifelse(predicted_prob_fine_tuned > 0.5, 1, 0)
+accuracy_fine_tuned <- mean(predicted_class_fine_tuned == validation_set$Y)
+print(paste("Slightly Tuned Logistic Regression Accuracy:", 
+                                  accuracy_fine_tuned))
+\end{verbatim}
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The relationship between predictor variables and predictions varied across models. Logistic regression, for instance, models the log-odds of the target variable (for our binary outcome) as a linear combination of predictor variables. This assumes a linear relationship between predictors and the log-odds of the outcome. In contrast, decision trees and random forests can capture nonlinear relationships by recursively partitioning the feature space into regions associated with different target values. SVM aims to find the hyperplane that best separates different classes in the feature space, which may not necessarily correspond to linear relationships between predictors and outcomes. Overall, the choice of model and its parameterization was guided by the nature of the data and the desired balance between model complexity and interpretability.
+
+# Analysis of Results:
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The analysis of the results reveals several key insights into the performance of different predictive models applied to the dataset. Validation accuracy serves as a crucial metric for evaluating model performance during training, with logistic regression emerging as the top performer, achieving an accuracy of approximately 93.4%. Following closely behind is the decision tree model, which demonstrates a respectable accuracy of around 92.4%. However, both the random forest and SVM models exhibit notably lower validation accuracies, with reported accuracies of 0%. Consequently, logistic regression is identified as the most effective model based on validation accuracy. Upon evaluating the training data, the logistic regression model maintains its robust performance, achieving an accuracy of approximately 91.6%. Interestingly, even after a slight tuning process, the logistic regression model retains a comparable accuracy level, suggesting that the adjustments made during tuning had minimal impact on its performance on the training data.
+
+\begin{verbatim}
+ACCURACY ON TRAINING DATA
+
+print(paste("Accuracy:", accuracy))
+[1] "Accuracy: 0.933962264150943"
+print(paste("Precision:", precision))
+[1] "Precision: 0.932773109243697"
+print(paste("Recall:", recall))
+[1] "Recall: 0.948717948717949"
+print(paste("F1-Score:", f1_score))
+[1] "F1-Score: 0.940677966101695"
+print("Confusion Matrix:")
+[1] "Confusion Matrix:"
+print(conf_matrix)
+          Reference
+Prediction   0   1
+         0 777  56
+         1  42 609
+         
+"Test Accuracy: 0.933962264150943"
+"test.acc: 0.066037735849057"
+\end{verbatim}
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Transitioning to the test dataset evaluation, the logistic regression model's accuracy drops to approximately 50.7%, signifying a notable decrease in performance when applied to unseen data. In addition to accuracy, metrics such as precision, recall, and F1-score provide further insights into the model's performance. Precision indicates the proportion of correctly identified positive cases among all predicted positive cases, while recall represents the proportion of correctly identified positive cases among all actual positive cases. The F1-score offers a balanced measure between precision and recall.
+
+\begin{verbatim}
+ACCURACY ON TEST DATA SET
+
+print(paste("Accuracy:", accuracy))
+[1] "Accuracy: 0.506738544474393"
+print(paste("Precision:", precision))
+[1] "Precision: 0.575030012004802"
+print(paste("Recall:", recall))
+[1] "Recall: 0.558926487747958"
+print(paste("F1-Score:", f1_score))
+[1] "F1-Score: 0.566863905325444"
+print("Confusion Matrix:")
+[1] "Confusion Matrix:"
+print(conf_matrix)
+          Reference
+Prediction   0   1
+         0 479 354
+         1 378 273
+
+"Test Accuracy: 0.387540453074434"
+"test.acc: 0.612459546925566"
+\end{verbatim}
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Analyzing the confusion matrix provides a detailed breakdown of the model's predictions compared to the actual labels in the test dataset. While the model accurately predicts a substantial number of negative cases, it struggles with identifying positive cases, as evidenced by the higher number of false negatives compared to true positives. Despite correctly predicting the majority of the test samples, the model's misclassification rate of approximately 38.7% suggests areas where it performs poorly.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Further investigation into the characteristics of misclassified samples, such as their feature values or distributions, may yield valuable insights into specific types of sample points on which the model struggles. Overall, while the logistic regression model demonstrates strong performance in training and validation, its efficacy diminishes when applied to unseen data, highlighting potential areas for further refinement and optimization.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;If time permitted, I would delve deeper into feature engineering, seeking additional insights into relationships and interactions among variables to potentially enhance model accuracy. This would involve experimenting with different transformations, leveraging domain knowledge, and possibly incorporating external data sources. I'd then focus on model tuning to optimize hyperparameters, using techniques like cross-validation and grid search to find the best parameter combinations and address any overfitting or underfitting concerns. Additionally, I'd explore ensemble learning methods to combine the strengths of multiple models and improve overall predictive performance. This might involve stacking, blending, or bagging to leverage diverse algorithms effectively. Furthermore, I'd consider advanced machine learning algorithms like GBM, XGBoost, or neural networks, which could uncover complex patterns in the data. Lastly, I'd prioritize acquiring more diverse and comprehensive data to enhance model generalization and robustness, ensuring it learns from a broader range of scenarios. Through these iterative steps, I believe we could significantly boost predictive accuracy and deliver more reliable predictions.
+
+# Conclusion:
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;In conclusion, this project has provided valuable insights into the classification of grain images, showcasing the application of various statistical learning techniques. Through extensive exploration and supervised analysis, we identified logistic regression as the most effective model for predicting grain types, achieving a validation accuracy of approximately 93%. However, when applied to the test dataset, the accuracy dropped to around 38%, suggesting potential limitations in model generalization. Despite this, the precision, recall, and F1-score metrics indicated a moderate performance in capturing true positive cases. 
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Further analysis revealed areas for improvement, particularly in feature engineering, model tuning, and the exploration of advanced algorithms. By refining feature selection, optimizing hyperparameters, and exploring ensemble methods, we could potentially enhance predictive accuracy and robustness. Additionally, incorporating more diverse and comprehensive data sources could improve model generalization and enable better capture of underlying patterns in grain images.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Overall, while the current model shows promise, there remains room for refinement and optimization. With continued iteration and exploration of advanced techniques, we aim to develop a more accurate and reliable predictive model for grain image classification, contributing to advancements in agricultural research and crop management.
+

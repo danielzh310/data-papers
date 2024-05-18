@@ -1,0 +1,250 @@
+---
+title: "Methods of Statistical Learning: 36-462 Final Project S24: Grain Image Classification"
+author: "Daniel Zhu"
+date: "April 22nd, 2024"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(gridExtra)
+library(alr4)
+library(regressinator)
+library(modelsummary)
+library(broom)
+library(lmtest)
+library(knitr)
+library(caret)
+library(dplyr)
+library(FNN)
+library(np)
+library(carat)
+library(boot)
+library(mgcv)
+library(gamair)
+library(AER)
+library(readr)
+library(glmnet)
+library(corrplot)
+```
+
+```{r}
+#ASUS
+train_data <- read.csv("/Users/class/Box/My Documents/36-462/train_data.csv")
+test_data <- read.csv("/Users/class/Box/My Documents/36-462/test_data_x.csv")
+#Lenovo
+#train_data <- read.csv("/Users/danie/Box/My Documents/36-462/train_data.csv")
+#test_data <- read.csv("/Users/danie/Box/My Documents/36-462/test_data_x.csv")
+```
+
+```{r}
+#str(train_data)
+#head(train_data)
+#summary(train_data)
+```
+
+```{r}
+#visualize distribution of grain type
+#barplot(table(train_data$Y), main = "Distribution of Grain Types", 
+#        xlab = "Grain Type", 
+#        ylab = "Frequency")
+```
+
+```{r}
+#for (i in 1:16) {
+#  hist(train_data[, i], main = names(train_data)[i], xlab = "")
+#}
+#pairs(train_data[, -17], col = train_data$Y + 1, 
+#      pch = 19, lower.panel = NULL)
+```
+
+```{r}
+#missing_values <- colSums(is.na(train_data))   
+#print(missing_values)
+
+#create interaction terms for highly correlated features
+train_data$Area_Perimeter <- train_data$Area * train_data$Perimeter
+train_data$AspectRation_Solidity <- train_data$AspectRation * train_data$Solidity
+
+X <- train_data[, -17]
+Y <- train_data$Y
+```
+
+```{r}
+#split the data into training and validation sets
+set.seed(123)  
+train_indices <- sample(1:nrow(train_data), 0.7 * nrow(train_data)) 
+train_set <- train_data[train_indices, ]
+validation_set <- train_data[-train_indices, ]
+
+# Logistic Regression
+logit_model <- glm(Y ~ ., data = train_set, family = "binomial")
+
+# Decision Tree
+tree_model <- rpart(Y ~ ., data = train_set, method = "class")
+
+# Random Forest
+rf_model <- randomForest(Y ~ ., data = train_set)
+
+# SVM
+svm_model <- svm(Y ~ ., data = train_set, kernel = "linear")
+
+# Logistic Regression
+predicted_prob_logit <- predict(logit_model, newdata = validation_set, 
+                                type = "response")
+predicted_class_logit <- ifelse(predicted_prob_logit > 0.5, 1, 0)
+accuracy_logit <- mean(predicted_class_logit == validation_set$Y)
+print(paste("Validation Accuracy (Logistic Regression):", accuracy_logit))
+
+# Decision Tree
+predicted_class_tree <- predict(tree_model, newdata = validation_set, 
+                                type = "class")
+accuracy_tree <- mean(predicted_class_tree == validation_set$Y)
+print(paste("Validation Accuracy (Decision Tree):", accuracy_tree))
+
+# Random Forest
+predicted_class_rf <- predict(rf_model, newdata = validation_set, 
+                              type = "response")
+accuracy_rf <- mean(predicted_class_rf == validation_set$Y)
+print(paste("Validation Accuracy (Random Forest):", accuracy_rf))
+
+# SVM
+predicted_class_svm <- predict(svm_model, newdata = validation_set)
+accuracy_svm <- mean(predicted_class_svm == validation_set$Y)
+print(paste("Validation Accuracy (SVM):", accuracy_svm))
+
+validation_accuracies <- c(accuracy_logit, accuracy_tree,
+                           accuracy_rf, accuracy_svm)
+best_model <- c("Logistic Regression", "Decision Tree", 
+                "Random Forest", "SVM")[which.max(validation_accuracies)]
+print(paste("Best Performing Model:", best_model))
+```
+
+```{r}
+#scaling the numeric features in the training set
+scaled_X <- as.data.frame(scale(X))
+correlation_matrix <- cor(X)
+
+#could be fun to visualize the matrix for the report
+#corrplot(correlation_matrix, method = "circle")
+
+highly_correlated <- findCorrelation(correlation_matrix, cutoff = 0.8)
+X_filtered <- X[, -highly_correlated]
+```
+
+```{r}
+#split the data into a training set and a validation set
+train_proportion <- 0.7
+train_size <- round(nrow(train_data) * train_proportion)
+train_indices <- sample(seq_len(nrow(train_data)), size = train_size)
+train_set <- train_data[train_indices, ]
+validation_set <- train_data[-train_indices, ]
+```
+
+```{r}
+logit_model <- glm(Y ~ ., data = train_set, family = "binomial")
+decision_tree <- rpart(Y ~ ., data = train_set)
+random_forest <- randomForest(Y ~ ., data = train_set)
+svm_model <- svm(Y ~ ., data = train_set)
+
+predicted_prob_logit <- predict(logit_model, newdata = validation_set, 
+                                type = "response")
+predicted_class_logit <- ifelse(predicted_prob_logit > 0.5, 1, 0)
+accuracy_logit <- mean(predicted_class_logit == validation_set$Y)
+print(paste("Logistic Regression Accuracy:", accuracy_logit))
+```
+
+```{r}
+#hyperparameter tuning for logistic regression
+glmnet_model <- cv.glmnet(as.matrix(train_set[, -17]), train_set$Y, 
+                          family = "binomial")
+best_alpha <- glmnet_model$lambda.min
+best_logit_model <- glmnet(as.matrix(train_set[, -17]), train_set$Y, 
+                           family = "binomial", alpha = best_alpha)
+
+#try some LASSO regularization
+lasso_model <- glmnet(as.matrix(train_set[, -17]), train_set$Y, 
+                      family = "binomial", alpha = 1)
+plot(lasso_model)
+```
+
+```{r}
+X_train <- train_set[, -17]
+Y_train <- train_set$Y
+
+formula <- as.formula(paste("Y ~ .", collapse = " + "))
+train_data_df <- cbind(Y = Y_train, X_train)
+cv_logit <- cv.glm(data = as.data.frame(train_data_df), 
+                   glmfit = logit_model, K = 5)
+
+best_lambda <- cv_logit$lambda.min
+best_logit_model <- update(logit_model, . ~ ., 
+                           data = as.data.frame(train_data_df))
+
+predicted_prob_fine_tuned <- predict(best_logit_model, newdata = validation_set, 
+                                     type = "response")
+predicted_class_fine_tuned <- ifelse(predicted_prob_fine_tuned > 0.5, 1, 0)
+accuracy_fine_tuned <- mean(predicted_class_fine_tuned == validation_set$Y)
+print(paste("Slightly Tuned Logistic Regression Accuracy:", accuracy_fine_tuned))
+```
+
+
+```{r}
+#setting up predictions on the test set
+predicted_prob_test <- predict(best_logit_model, newdata = test_data, type = "response")
+predicted_class_test <- ifelse(predicted_prob_test > 0.5, 1, 0)
+submission <- data.frame(y.guesses = predicted_class_test)
+```
+
+
+```{r}
+predicted_class <- ifelse(predicted_prob > 0.5, 1, 0)
+metrics <- confusionMatrix(data = factor(predicted_class), 
+                           reference = factor(validation_set$Y))
+accuracy <- metrics$overall["Accuracy"]
+precision <- metrics$byClass["Precision"]
+recall <- metrics$byClass["Recall"]
+f1_score <- metrics$byClass["F1"]
+
+#write out confusion matrix
+conf_matrix <- metrics$table
+
+print(paste("Accuracy:", accuracy))
+print(paste("Precision:", precision))
+print(paste("Recall:", recall))
+print(paste("F1-Score:", f1_score))
+print("Confusion Matrix:")
+print(conf_matrix)
+```
+
+```{r}
+predicted_prob_test <- predict(logit_model, newdata = test_data, 
+                               type = "response")
+predicted_class_test <- ifelse(predicted_prob_test > 0.5, 1, 0)
+
+#test accuracy
+if (anyNA(predicted_class_test)) {
+  print("Error: NaN Generated (Go back and fix it bum)")
+} else {
+  test_accuracy <- mean(predicted_class_test)
+  print(paste("Test Accuracy:", test_accuracy))
+}
+
+#submission steps
+y.guesses <- predicted_class_test  
+test.acc <- 1- test_accuracy  
+team.name <- "danielzh"
+
+#y.guesses
+#error rate
+test.acc
+
+#save the variables
+save(list = c("y.guesses", "test.acc", "team.name"), 
+     file = "stat462project.RData")
+```
