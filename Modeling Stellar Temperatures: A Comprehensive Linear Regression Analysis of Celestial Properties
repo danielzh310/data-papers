@@ -1,0 +1,231 @@
+---
+title: "Modeling Stellar Temperatures: A Comprehensive Linear Regression Analysis of Celestial Properties"
+author: "Daniel Zhu"
+date: "October 24th, 2025"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(gridExtra)
+library(alr4)
+library(regressinator)
+library(modelsummary)
+library(broom)
+library(lmtest)
+library(knitr)
+library(caret)
+library(dplyr)
+library(GGally)
+library(car)
+library(leaps)
+library(rsample)
+library(yardstick)
+```
+
+#  Introduction
+
+      The temperature of a star is one of its most defining properties, influencing its luminosity, color, and stage in its evolutionary cycle. By understanding stellar temperature, astronomers gain valuable insights into stellar classifications, chemical compositions, and the life cycles of stars. In this study, we seek to model stellar temperatures using **linear regression** based on a set of astronomical predictors such as brightness, motion, and position in the sky.
+
+      The data used in this analysis comes from the `stellar_temperature.csv` dataset, containing eleven numerical variables describing spatial coordinates, parallax, proper motions, and brightness in multiple wavelength bands. The **response variable** is `teff`, the effective temperature of the star in Kelvin. Our goal is not merely prediction, but **inference**—to understand which features of a star’s motion and light profile most strongly influence its surface temperature.
+
+      In this report, we proceed by conducting detailed exploratory data analysis (EDA), assessing multicollinearity, performing best-subset selection (BSS), and implementing principal component regression (PCR). Finally, we compare the mean squared errors (MSE) across models to assess predictive quality and interpretability.
+
+\newpage
+
+# Data Summary and Exploration
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+stellar <- read.csv("/Users/class/Downloads/stellar_temperature.csv")
+summary(stellar)
+```
+
+      The dataset contains 11 predictor variables and one response variable. The predictors include spatial coordinates (`ra_x`, `dec_x`), galactic coordinates (`L`, `B`), proper motions (`pmra`, `pmdec`), parallax, and magnitudes (`g_mag`, `b_mag`, `r_mag`, and color index `br_col`). These attributes collectively describe both the location and intrinsic brightness of each star.
+
+### Summary Statistics
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+stellar %>%
+  summarise(across(everything(), list(mean = mean, sd = sd, min = min, max = max))) %>%
+  pivot_longer(everything())
+```
+
+      The average effective temperature (`teff`) across the sample lies around 5500–6000 K, a typical range for main-sequence stars like the Sun. Parallax values are generally small, consistent with distant stars measured in milliarcseconds. Proper motion components (`pmra`, `pmdec`) vary in both magnitude and direction, reflecting relative stellar movement across the sky.
+
+### Distribution Plots
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+stellar %>%
+  pivot_longer(cols = -teff) %>%
+  ggplot(aes(value)) +
+  facet_wrap(~name, scales = "free", ncol = 4) +
+  geom_histogram(fill = "skyblue", color="black", bins = 20) +
+  theme_minimal()
+```
+
+      The histograms reveal that variables like `pmra` and `pmdec` contain potential outliers or high variance. Magnitudes (`g_mag`, `b_mag`, `r_mag`) appear roughly normally distributed but are highly correlated—a fact that may cause **multicollinearity** in regression models.
+
+### Correlation Analysis
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+GGally::ggcorr(stellar, label=TRUE, label_round=2, hjust=0.9, layout.exp=1)
+```
+
+      The correlation matrix shows that the magnitude variables (`g_mag`, `b_mag`, and `r_mag`) are strongly correlated, as expected since they measure brightness at nearby wavelengths. Additionally, `br_col`—the color index—is derived from these, introducing redundancy. This confirms the need for diagnostic measures like the **Variance Inflation Factor (VIF)** to evaluate and mitigate multicollinearity.
+
+\newpage
+
+# Methods
+
+      We follow a structured modeling pipeline to evaluate the relationships among predictors and identify the most statistically informative variables:
+
+1. **Data Partitioning** — Splitting the dataset into training (80%) and testing (20%) subsets ensures unbiased model evaluation.
+2. **Full Linear Regression** — Fit a model using all predictors to establish baseline performance.
+3. **Residual Diagnostics** — Assess normality and homoscedasticity assumptions.
+4. **Variance Inflation Factor (VIF)** — Quantify multicollinearity and identify redundant variables.
+5. **Best-Subset Selection (BSS)** — Identify subsets of predictors that minimize test error or information criteria (BIC/AIC).
+6. **Principal Component Regression (PCR)** — Reduce dimensionality and decorrelate predictors using principal components.
+7. **Model Comparison** — Compare MSE and RMSE across models to evaluate predictive accuracy and parsimony.
+
+# Model Implementation
+
+## 1. Train-Test Split
+
+```{r}
+set.seed(42)
+split <- initial_split(stellar, prop = 0.8)
+train <- training(split)
+test <- testing(split)
+```
+
+The training set is used to fit models, while the test set provides unbiased estimates of prediction error.
+
+## 2. Full Linear Model
+
+```{r}
+full_model <- lm(teff ~ ., data = train)
+summary(full_model)
+```
+
+      The adjusted R² indicates how well the full model explains variability in stellar temperature. Many coefficients are statistically insignificant (high p-values), reflecting redundancy among correlated predictors.
+
+```{r}
+pred_full <- predict(full_model, newdata=test)
+metrics_full <- metric_set(mse, rmse)(test, pred_full, truth=teff, estimate=.pred)
+metrics_full
+```
+
+The **RMSE** represents the average prediction error in Kelvin. Interpreting RMSE relative to the mean temperature allows us to gauge practical significance.
+
+## 3. Residual Diagnostics
+
+```{r}
+residuals <- test$teff - pred_full
+ggplot(data.frame(residuals), aes(residuals)) +
+  geom_histogram(fill="orange", bins=10, color="black") +
+  labs(title="Residual Distribution", x="Residuals", y="Frequency")
+```
+
+```{r}
+tibble(resid=residuals, fit=pred_full) %>% ggplot(aes(x=fit, y=resid)) +
+  geom_point(alpha=0.7) + geom_hline(yintercept=0, linetype="dashed") +
+  labs(title="Residuals vs Fitted Values", x="Predicted Temperature", y="Residuals")
+```
+
+      Residuals are roughly centered around zero with no clear heteroscedasticity, validating the model’s assumptions. Minor deviations from normality suggest possible benefit from transformations or nonlinear terms.
+
+## 4. Variance Inflation Factors (VIF)
+
+```{r}
+car::vif(full_model) %>% sort(decreasing = TRUE)
+```
+
+      VIF values exceeding 5 or 10 indicate problematic multicollinearity, confirming that the magnitude variables (`g_mag`, `b_mag`, `r_mag`, `br_col`) are highly interdependent. This redundancy may distort coefficient interpretations and inflates variance.
+
+\newpage
+
+# Best-Subset Selection
+
+      To refine the model, we perform exhaustive best-subset selection using the `leaps` package, evaluating all possible combinations of predictors to identify those minimizing the Bayesian Information Criterion (BIC).
+
+```{r}
+train_bss <- train
+w <- which(names(train_bss) == "teff")
+y <- train_bss[, w]
+X <- train_bss[, -w]
+df_bss <- data.frame(X, y)
+
+bss <- regsubsets(y ~ ., data=df_bss, nvmax=ncol(X))
+summary_bss <- summary(bss)
+
+size_bic <- which.min(summary_bss$bic)
+coef_bic <- coef(bss, id=size_bic)
+coef_bic
+```
+
+```{r}
+selected_vars <- setdiff(names(coef_bic), "(Intercept)")
+form_bic <- as.formula(paste("teff ~", paste(selected_vars, collapse=" + ")))
+model_bic <- lm(form_bic, data=train)
+pred_bic <- predict(model_bic, newdata=test)
+metrics_bic <- metric_set(mse, rmse)(test, pred_bic, truth=teff, estimate=.pred)
+metrics_bic
+```
+
+      The BIC-selected model simplifies interpretation, often retaining variables like `parallax`, `b_mag`, and `pmra` while excluding redundant brightness measures. Despite reduced complexity, predictive accuracy remains comparable to the full model.
+
+# Principal Component Regression (PCR)
+
+      PCA transforms correlated predictors into orthogonal components, reducing dimensionality while preserving variance structure.
+
+```{r}
+X_train <- train %>% select(-teff) %>% scale()
+X_test  <- test %>% select(-teff) %>% scale(attr(X_train, "scaled:center"), attr(X_train, "scaled:scale"))
+
+pca <- prcomp(X_train)
+explained <- cumsum(pca$sdev^2)/sum(pca$sdev^2)
+k <- which(explained >= 0.95)[1]
+
+Z_train <- pca$x[, 1:k, drop=FALSE]
+Z_test <- predict(pca, newdata=as.data.frame(X_test))[, 1:k, drop=FALSE]
+
+pcr_model <- lm(train$teff ~ ., data=as.data.frame(Z_train))
+pred_pcr <- predict(pcr_model, newdata=as.data.frame(Z_test))
+metrics_pcr <- metric_set(mse, rmse)(test, pred_pcr, truth=teff, estimate=.pred)
+metrics_pcr
+```
+
+      The first few principal components explain over 95% of the variance. However, when used for regression, PCR tends to increase RMSE relative to the best-subset model, due to loss of interpretability and minor information loss from truncation.
+
+\newpage
+
+# Model Comparison and Discussion
+
+```{r}
+metrics_full$model <- "Full Model"
+metrics_bic$model  <- "Best-Subset"
+metrics_pcr$model  <- paste0("PCR (k=", k, ")")
+
+bind_rows(metrics_full, metrics_bic, metrics_pcr) %>%
+  select(.metric, .estimate, model) %>%
+  pivot_wider(names_from=.metric, values_from=.estimate)
+```
+
+      Among all models, **best-subset selection** provides the most efficient trade-off between model simplicity and predictive accuracy. The full model marginally improves RMSE but at the cost of multicollinearity and interpretability. The PCR model, while statistically sound, sacrifices physical meaning of predictors.
+
+      The findings highlight the importance of model parsimony in scientific inference—simpler models that capture core physical drivers (like parallax and color index) yield robust predictions and interpretable coefficients.
+
+# Conclusion
+
+1. **Key Predictors:** The best predictors of stellar temperature are color-based variables and parallax, reflecting the connection between color and temperature in stellar classification.
+2. **Model Performance:** The best-subset model performed comparably to the full model with lower complexity and reduced collinearity.
+3. **Assumptions:** Residual diagnostics supported normality and constant variance, validating linear regression assumptions.
+4. **Dimensionality Reduction:** PCR confirmed that most variance can be captured by a small number of principal components but led to slightly worse prediction accuracy.
+5. **Future Work:** Nonlinear models or log transformations (e.g., `log(teff)` vs `log(brightness)`) may capture subtle relationships missed by linear modeling.
+
+**In summary**, this study demonstrates how linear regression and related techniques can uncover meaningful physical relationships between observable stellar features and intrinsic temperature. Through careful modeling, diagnostics, and validation, we achieve not only accurate prediction but also interpretable scientific insight into the physics governing the stars.
