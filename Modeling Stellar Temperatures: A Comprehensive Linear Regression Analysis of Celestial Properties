@@ -41,7 +41,7 @@ library(yardstick)
 # Data Summary and Exploration
 
 ```{r, echo=FALSE, warning=FALSE, message=FALSE}
-stellar <- read.csv("/Users/class/Downloads/stellar_temperature.csv")
+stellar <- read.csv("/Users/danie/Downloads/stellar_temperature.csv")
 summary(stellar)
 ```
 
@@ -115,8 +115,10 @@ summary(full_model)
       The adjusted R² indicates how well the full model explains variability in stellar temperature. Many coefficients are statistically insignificant (high p-values), reflecting redundancy among correlated predictors.
 
 ```{r}
-pred_full <- predict(full_model, newdata=test)
-metrics_full <- metric_set(mse, rmse)(test, pred_full, truth=teff, estimate=.pred)
+pred_full <- predict(full_model, newdata = test)
+test$pred <- pred_full
+
+metrics_full <- yardstick::metrics(test, truth = teff, estimate = pred)
 metrics_full
 ```
 
@@ -142,7 +144,9 @@ tibble(resid=residuals, fit=pred_full) %>% ggplot(aes(x=fit, y=resid)) +
 ## 4. Variance Inflation Factors (VIF)
 
 ```{r}
-car::vif(full_model) %>% sort(decreasing = TRUE)
+clean_model <- lm(teff ~ ra_x + dec_x + parallax + pmra 
+                  + pmdec + g_mag + L + B, data = train)
+car::vif(clean_model)
 ```
 
       VIF values exceeding 5 or 10 indicate problematic multicollinearity, confirming that the magnitude variables (`g_mag`, `b_mag`, `r_mag`, `br_col`) are highly interdependent. This redundancy may distort coefficient interpretations and inflates variance.
@@ -169,12 +173,12 @@ coef_bic
 ```
 
 ```{r}
-selected_vars <- setdiff(names(coef_bic), "(Intercept)")
-form_bic <- as.formula(paste("teff ~", paste(selected_vars, collapse=" + ")))
-model_bic <- lm(form_bic, data=train)
-pred_bic <- predict(model_bic, newdata=test)
-metrics_bic <- metric_set(mse, rmse)(test, pred_bic, truth=teff, estimate=.pred)
-metrics_bic
+pred_bic <- predict(model_bic, newdata = test)
+
+mse_bic <- mean((test$teff - pred_bic)^2)
+rmse_bic <- sqrt(mse_bic)
+
+data.frame(MSE = mse_bic, RMSE = rmse_bic)
 ```
 
       The BIC-selected model simplifies interpretation, often retaining variables like `parallax`, `b_mag`, and `pmra` while excluding redundant brightness measures. Despite reduced complexity, predictive accuracy remains comparable to the full model.
@@ -184,20 +188,38 @@ metrics_bic
       PCA transforms correlated predictors into orthogonal components, reducing dimensionality while preserving variance structure.
 
 ```{r}
-X_train <- train %>% select(-teff) %>% scale()
-X_test  <- test %>% select(-teff) %>% scale(attr(X_train, "scaled:center"), attr(X_train, "scaled:scale"))
+# 1. Extract same predictor columns explicitly
+predictor_names <- setdiff(names(train), "teff")
 
-pca <- prcomp(X_train)
-explained <- cumsum(pca$sdev^2)/sum(pca$sdev^2)
+X_train <- train[, predictor_names]
+X_test  <- test[, predictor_names]
+
+# 2. Standardize using same center and scale
+X_train_scaled <- scale(X_train, center = TRUE, scale = TRUE)
+X_test_scaled  <- scale(X_test,
+                        center = attr(X_train_scaled, "scaled:center"),
+                        scale  = attr(X_train_scaled, "scaled:scale"))
+
+# 3. PCA on standardized training data
+pca <- prcomp(X_train_scaled)
+
+# 4. Determine number of PCs for 95% variance
+explained <- cumsum(pca$sdev^2) / sum(pca$sdev^2)
 k <- which(explained >= 0.95)[1]
+cat("Number of components explaining ≥95% variance:", k, "\\n")
 
-Z_train <- pca$x[, 1:k, drop=FALSE]
-Z_test <- predict(pca, newdata=as.data.frame(X_test))[, 1:k, drop=FALSE]
+# 5. Transform to PC space
+Z_train <- as.data.frame(pca$x[, 1:k, drop = FALSE])
+Z_test  <- as.data.frame(predict(pca, newdata = X_test_scaled)[, 1:k, drop = FALSE])
 
-pcr_model <- lm(train$teff ~ ., data=as.data.frame(Z_train))
-pred_pcr <- predict(pcr_model, newdata=as.data.frame(Z_test))
-metrics_pcr <- metric_set(mse, rmse)(test, pred_pcr, truth=teff, estimate=.pred)
-metrics_pcr
+# 6. Fit PCR model and evaluate
+pcr_model <- lm(train$teff ~ ., data = Z_train)
+pred_pcr  <- predict(pcr_model, newdata = Z_test)
+
+mse_pcr  <- mean((test$teff - pred_pcr)^2)
+rmse_pcr <- sqrt(mse_pcr)
+
+data.frame(MSE = mse_pcr, RMSE = rmse_pcr)
 ```
 
       The first few principal components explain over 95% of the variance. However, when used for regression, PCR tends to increase RMSE relative to the best-subset model, due to loss of interpretability and minor information loss from truncation.
@@ -207,13 +229,29 @@ metrics_pcr
 # Model Comparison and Discussion
 
 ```{r}
-metrics_full$model <- "Full Model"
-metrics_bic$model  <- "Best-Subset"
-metrics_pcr$model  <- paste0("PCR (k=", k, ")")
+# === Full Model Metrics ===
+pred_full <- predict(full_model, newdata = test)
+mse_full <- mean((test$teff - pred_full)^2)
+rmse_full <- sqrt(mse_full)
+metrics_full <- data.frame(model = "Full Model", MSE = mse_full, RMSE = rmse_full)
 
-bind_rows(metrics_full, metrics_bic, metrics_pcr) %>%
-  select(.metric, .estimate, model) %>%
-  pivot_wider(names_from=.metric, values_from=.estimate)
+# === Best Subset Metrics ===
+pred_bic <- predict(model_bic, newdata = test)
+mse_bic <- mean((test$teff - pred_bic)^2)
+rmse_bic <- sqrt(mse_bic)
+metrics_bic <- data.frame(model = "Best-Subset", MSE = mse_bic, RMSE = rmse_bic)
+
+# === PCR Metrics ===
+mse_pcr <- mean((test$teff - pred_pcr)^2)
+rmse_pcr <- sqrt(mse_pcr)
+metrics_pcr <- data.frame(model = paste0("PCR (k=", k, ")"), MSE = mse_pcr, RMSE = rmse_pcr)
+
+# === Combine ===
+library(dplyr)
+
+model_comparison <- bind_rows(metrics_full, metrics_bic, metrics_pcr)
+model_comparison
+
 ```
 
       Among all models, **best-subset selection** provides the most efficient trade-off between model simplicity and predictive accuracy. The full model marginally improves RMSE but at the cost of multicollinearity and interpretability. The PCR model, while statistically sound, sacrifices physical meaning of predictors.
