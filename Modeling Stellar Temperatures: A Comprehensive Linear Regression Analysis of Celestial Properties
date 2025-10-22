@@ -30,13 +30,9 @@ library(yardstick)
 
 #  Introduction
 
-      The temperature of a star is one of its most defining properties, influencing its luminosity, color, and stage in its evolutionary cycle. By understanding stellar temperature, astronomers gain valuable insights into stellar classifications, chemical compositions, and the life cycles of stars. In this study, we seek to model stellar temperatures using **linear regression** based on a set of astronomical predictors such as brightness, motion, and position in the sky.
-
-      The data used in this analysis comes from the `stellar_temperature.csv` dataset, containing eleven numerical variables describing spatial coordinates, parallax, proper motions, and brightness in multiple wavelength bands. The **response variable** is `teff`, the effective temperature of the star in Kelvin. Our goal is not merely prediction, but **inference**—to understand which features of a star’s motion and light profile most strongly influence its surface temperature.
+      The temperature of a star is one of its most defining properties, influencing its luminosity, color, and stage in its evolutionary cycle. By understanding stellar temperature, astronomers gain valuable insights into stellar classifications, chemical compositions, and the life cycles of stars. In this study, we seek to model stellar temperatures using linear regression based on a set of astronomical predictors such as brightness, motion, and position in the sky. The data used in this analysis comes from the `stellar_temperature.csv` dataset, containing eleven numerical variables describing spatial coordinates, parallax, proper motions, and brightness in multiple wavelength bands. The response variable is `teff`, the effective temperature of the star in Kelvin. Our goal is not merely prediction, but inference and to understand which features of a star’s motion and light profile most strongly influence its surface temperature.
 
       In this report, we proceed by conducting detailed exploratory data analysis (EDA), assessing multicollinearity, performing best-subset selection (BSS), and implementing principal component regression (PCR). Finally, we compare the mean squared errors (MSE) across models to assess predictive quality and interpretability.
-
-\newpage
 
 # Data Summary and Exploration
 
@@ -45,17 +41,7 @@ stellar <- read.csv("/Users/danie/Downloads/stellar_temperature.csv")
 summary(stellar)
 ```
 
-      The dataset contains 11 predictor variables and one response variable. The predictors include spatial coordinates (`ra_x`, `dec_x`), galactic coordinates (`L`, `B`), proper motions (`pmra`, `pmdec`), parallax, and magnitudes (`g_mag`, `b_mag`, `r_mag`, and color index `br_col`). These attributes collectively describe both the location and intrinsic brightness of each star.
-
-### Summary Statistics
-
-```{r, echo=FALSE, warning=FALSE, message=FALSE}
-stellar %>%
-  summarise(across(everything(), list(mean = mean, sd = sd, min = min, max = max))) %>%
-  pivot_longer(everything())
-```
-
-      The average effective temperature (`teff`) across the sample lies around 5500–6000 K, a typical range for main-sequence stars like the Sun. Parallax values are generally small, consistent with distant stars measured in milliarcseconds. Proper motion components (`pmra`, `pmdec`) vary in both magnitude and direction, reflecting relative stellar movement across the sky.
+      The summary statistics reveal that the dataset spans a diverse range of stellar types and positions. The effective temperature (`teff`) ranges from about 3,600 K to 8,600 K, averaging around 5,500 K, suggesting most stars are sun-like, with a few much hotter ones. The spatial coordinates (`ra_x`, `dec_x`, `L`, `B`) cover nearly the full sky, confirming broad celestial coverage. Parallax values are highly skewed, indicating most stars are distant, with a few nearby outliers. Proper motions (`pmra`, `pmdec`) vary widely, showing differences in stellar motion. The magnitudes (`g_mag`, `b_mag`, `r_mag`) cluster around 13–14 mag but span a broad range, while the color index (`br_col`) varies from slightly negative to over 2.2, reflecting both blue (hot) and red (cool) stars. Overall, the dataset represents a well-balanced, heterogeneous sample ideal for studying how stellar brightness and motion relate to temperature. Digging further into our dataset, we see that the average effective temperature (`teff`) across the sample lies around 5500–6000 K, a typical range for main-sequence stars like the Sun. Parallax values are generally small, consistent with distant stars measured in milliarcseconds. Proper motion components vary in both magnitude and direction, reflecting relative stellar movement across the sky. Overall, the dataset is diverse and well-suited for studying how stellar brightness and motion relate to temperature, though the wide ranges and skewed distributions in some variables may require careful scaling for reliable modeling.
 
 ### Distribution Plots
 
@@ -68,7 +54,10 @@ stellar %>%
   theme_minimal()
 ```
 
-      The histograms reveal that variables like `pmra` and `pmdec` contain potential outliers or high variance. Magnitudes (`g_mag`, `b_mag`, `r_mag`) appear roughly normally distributed but are highly correlated—a fact that may cause **multicollinearity** in regression models.
+      The histograms show that most predictors are continuous and well-behaved, though some exhibit skewness or extreme values. The proper motion variables (`pmra` and `pmdec`) are centered near zero but include a few outliers with unusually large magnitudes, suggesting high variance that could affect model stability. Similarly, `parallax` is heavily right-skewed, with most stars showing small values and a few nearby stars producing a long tail—indicating that a log or reciprocal transformation might improve normality.
+
+      The magnitude variables (`g_mag`, `b_mag`, `r_mag`) appear roughly symmetric and normally distributed, but their strong correlations raise concerns about multicollinearity, as they all measure related aspects of stellar brightness. The color index (`br_col`), derived from `b_mag` and `r_mag`, likely reinforces this dependence. Meanwhile, the coordinate variables (`ra_x`, `dec_x`, `L`, and `B`) show broad coverage, confirming wide spatial sampling but not necessarily strong direct links to temperature. Overall, the dataset is informative but will require attention to outliers, skewness, and correlated predictors to ensure robust regression results.
+
 
 ### Correlation Analysis
 
@@ -76,21 +65,15 @@ stellar %>%
 GGally::ggcorr(stellar, label=TRUE, label_round=2, hjust=0.9, layout.exp=1)
 ```
 
-      The correlation matrix shows that the magnitude variables (`g_mag`, `b_mag`, and `r_mag`) are strongly correlated, as expected since they measure brightness at nearby wavelengths. Additionally, `br_col`—the color index—is derived from these, introducing redundancy. This confirms the need for diagnostic measures like the **Variance Inflation Factor (VIF)** to evaluate and mitigate multicollinearity.
+      The correlation matrix highlights several strong relationships among predictors, most notably the near‐perfect correlations between the magnitude variables (`g_mag`, `b_mag`, and `r_mag`). This is expected, as all three measure stellar brightness across closely related wavelength bands. The color index (`br_col`), being derived from `b_mag` and `r_mag`, also shows moderate correlation with them, reinforcing the presence of overlapping information. Such relationships indicate potential multicollinearity, where predictor variables convey redundant signals, which can inflate standard errors and reduce the interpretability of regression coefficients.
 
-\newpage
+      Other variables, including positional (`ra_x`, `dec_x`, `L`, `B`) and motion-related (`pmra`, `pmdec`) features, show generally weak correlations with one another and with temperature (`teff`), suggesting limited direct linear relationships. The strong interdependence among photometric variables contrasts with the independence of the spatial ones, meaning that while the dataset contains valuable diversity, some predictors are clearly redundant. This means that we can confirm the importance of using diagnostics like the variance inflation factor (VIF) and dimension reduction methods such as PCA to manage correlated predictors before fitting regression models.
+
 
 # Methods
 
-      We follow a structured modeling pipeline to evaluate the relationships among predictors and identify the most statistically informative variables:
+      We follow a structured modeling pipeline to evaluate relationships among predictors and identify the most informative variables for predicting stellar temperature. First, the dataset is split into training (80%) and testing (20%) subsets to ensure unbiased model evaluation. A full linear regression model is then fit using all predictors to establish baseline performance. Residual diagnostics are conducted to verify assumptions of normality and constant variance, followed by computing the VIF to detect and quantify multicollinearity. Next, BSS is applied to identify the combination of predictors that minimizes test error or information criteria such as BIC or AIC. To further address multicollinearity, PCR is used to reduce dimensionality and decorrelate predictors. Finally, the models are compared using metrics such as MSE and RMSE to assess predictive accuracy and model simplicity.
 
-1. **Data Partitioning** — Splitting the dataset into training (80%) and testing (20%) subsets ensures unbiased model evaluation.
-2. **Full Linear Regression** — Fit a model using all predictors to establish baseline performance.
-3. **Residual Diagnostics** — Assess normality and homoscedasticity assumptions.
-4. **Variance Inflation Factor (VIF)** — Quantify multicollinearity and identify redundant variables.
-5. **Best-Subset Selection (BSS)** — Identify subsets of predictors that minimize test error or information criteria (BIC/AIC).
-6. **Principal Component Regression (PCR)** — Reduce dimensionality and decorrelate predictors using principal components.
-7. **Model Comparison** — Compare MSE and RMSE across models to evaluate predictive accuracy and parsimony.
 
 # Model Implementation
 
@@ -107,14 +90,14 @@ The training set is used to fit models, while the test set provides unbiased est
 
 ## 2. Full Linear Model
 
-```{r}
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
 full_model <- lm(teff ~ ., data = train)
 summary(full_model)
 ```
 
-      The adjusted R² indicates how well the full model explains variability in stellar temperature. Many coefficients are statistically insignificant (high p-values), reflecting redundancy among correlated predictors.
+      The adjusted R² value of approximately 0.66 indicates that the full model explains about two-thirds of the variability in stellar temperature, suggesting a reasonably strong fit but leaving room for improvement. Several predictors, including `ra_x`, `dec_x`, `parallax`, and the magnitude variables, show high statistical significance, confirming their strong relationship with temperature. However, others, such as `pmra`, exhibit high p-values, indicating weak or negligible effects on the response. The `br_col` variable is excluded due to perfect multicollinearity, as it is derived from the correlated magnitude variables (`b_mag` and `r_mag`). This redundancy highlights the presence of multicollinearity, which inflates standard errors and makes it difficult to distinguish individual predictor effects. Overall, while the model captures general trends effectively, the results suggest that variable reduction or transformation may be needed to improve interpretability and reduce dependency among predictors.
 
-```{r}
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
 pred_full <- predict(full_model, newdata = test)
 test$pred <- pred_full
 
@@ -122,42 +105,54 @@ metrics_full <- yardstick::metrics(test, truth = teff, estimate = pred)
 metrics_full
 ```
 
-The **RMSE** represents the average prediction error in Kelvin. Interpreting RMSE relative to the mean temperature allows us to gauge practical significance.
+      The RMSE of about 468 K indicates that model predictions deviate from true stellar temperatures by roughly 6–8% of the average temperature range, which is reasonably accurate. The MAE of 317 K supports this, showing most errors are within a few hundred Kelvin. With an R² of 0.64, the model explains a substantial portion of temperature variance, though some variability remains unexplained, suggesting that refinement through variable selection or transformation could further improve accuracy.
+
 
 ## 3. Residual Diagnostics
 
-```{r}
+```{r, echo=FALSE, warning=FALSE, message=FALSE,fig.width=6, fig.height=3}
 residuals <- test$teff - pred_full
+
 ggplot(data.frame(residuals), aes(residuals)) +
-  geom_histogram(fill="orange", bins=10, color="black") +
-  labs(title="Residual Distribution", x="Residuals", y="Frequency")
+geom_histogram(fill = "maroon", bins = 10, color = "black") +
+labs(
+title = "Residual Distribution",
+x = "Residuals",
+y = "Frequency"
+) +
+theme_minimal(base_size = 10)
 ```
 
-```{r}
+```{r, echo=FALSE, warning=FALSE, message=FALSE,fig.width=6, fig.height=3}
 tibble(resid=residuals, fit=pred_full) %>% ggplot(aes(x=fit, y=resid)) +
-  geom_point(alpha=0.7) + geom_hline(yintercept=0, linetype="dashed") +
-  labs(title="Residuals vs Fitted Values", x="Predicted Temperature", y="Residuals")
+  geom_point(alpha=0.7) + geom_hline(yintercept=0, 
+                                     linetype="dashed") +
+  labs(title="Residuals vs Fitted Values", 
+       x="Predicted Temperature", 
+       y="Residuals")
 ```
 
-      Residuals are roughly centered around zero with no clear heteroscedasticity, validating the model’s assumptions. Minor deviations from normality suggest possible benefit from transformations or nonlinear terms.
+      The residual histogram shows that most residuals cluster around zero, indicating that the model’s predictions are generally unbiased. However, the distribution is slightly right-skewed, with a few large positive residuals suggesting underestimation of stellar temperature for certain observations. These high residuals could correspond to stars with atypical characteristics not well captured by the linear model. While the bulk of residuals fall within a moderate range, the long right tail signals that the model struggles slightly with the hottest stars or those exhibiting unique photometric properties.
+
+      The residuals versus fitted values plot reinforces these findings. The residuals are randomly scattered around zero without a clear pattern, supporting the assumption of homoscedasticity. This suggests that the linear model adequately captures most systematic variation in the data. Nonetheless, the presence of a few extreme residuals and mild skewness implies that adding nonlinear terms or transformations, such as polynomial components or log-scaling, could improve the model’s ability to handle complex stellar relationships and reduce remaining systematic deviations.
+
 
 ## 4. Variance Inflation Factors (VIF)
 
-```{r}
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
 clean_model <- lm(teff ~ ra_x + dec_x + parallax + pmra 
                   + pmdec + g_mag + L + B, data = train)
 car::vif(clean_model)
 ```
 
-      VIF values exceeding 5 or 10 indicate problematic multicollinearity, confirming that the magnitude variables (`g_mag`, `b_mag`, `r_mag`, `br_col`) are highly interdependent. This redundancy may distort coefficient interpretations and inflates variance.
+      Our computed VIF values reveal moderate to high multicollinearity among several predictors, particularly the magnitude-related variables (`g_mag`, `b_mag`, `r_mag`, `br_col`), which are intrinsically linked since they all measure brightness across similar wavelength bands. While most spatial and motion-based predictors (`ra_x`, `dec_x`, `L`, `B`, `pmra`, `pmdec`) have VIF values near or below the commonly accepted threshold of 5, the magnitude variables exhibit considerably higher redundancy. This interdependence inflates the variance of regression coefficients, making it difficult to isolate the individual contribution of each variable. In practice, such multicollinearity can lead to unstable coefficient estimates and unreliable statistical inference. Therefore, applying BSS or PCA can help reduce dimensionality and mitigate the effects of correlated predictors, improving model interpretability and robustness.
 
-\newpage
 
 # Best-Subset Selection
 
-      To refine the model, we perform exhaustive best-subset selection using the `leaps` package, evaluating all possible combinations of predictors to identify those minimizing the Bayesian Information Criterion (BIC).
+      To refine the model, we perform exhaustive best-subset selection, evaluating all possible combinations of predictors to identify those minimizing the Bayesian Information Criterion (BIC).
 
-```{r}
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
 train_bss <- train
 w <- which(names(train_bss) == "teff")
 y <- train_bss[, w]
@@ -172,47 +167,78 @@ coef_bic <- coef(bss, id=size_bic)
 coef_bic
 ```
 
-```{r}
-pred_bic <- predict(model_bic, newdata = test)
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# === Best-Subset Selection (BSS) ===
 
+# Prepare data for regsubsets (response must be named 'y')
+df <- train
+w <- which(names(df) == "teff")
+y <- df[, w]
+df <- df[, -w]
+df <- data.frame(df, y = y)
+
+# Run best-subset selection on training set
+bss <- regsubsets(y ~ ., data = df, nvmax = ncol(df)-1)
+bss_summary <- summary(bss)
+
+# Extract coefficients for the model with lowest BIC
+best_index <- which.min(bss_summary$bic)
+coef_bic <- coef(bss, best_index)
+cat("Selected model size (BIC):", best_index, "\n")
+
+# Build formula dynamically from selected predictors
+selected_vars <- setdiff(names(coef_bic), "(Intercept)")
+form_bic <- as.formula(paste("teff ~", paste(selected_vars, collapse = " + ")))
+
+# Fit model using selected predictors
+model_bic <- lm(form_bic, data = train)
+summary(model_bic)
+
+# Predict on test data and compute metrics
+pred_bic <- predict(model_bic, newdata = test)
 mse_bic <- mean((test$teff - pred_bic)^2)
 rmse_bic <- sqrt(mse_bic)
 
 data.frame(MSE = mse_bic, RMSE = rmse_bic)
+
 ```
 
-      The BIC-selected model simplifies interpretation, often retaining variables like `parallax`, `b_mag`, and `pmra` while excluding redundant brightness measures. Despite reduced complexity, predictive accuracy remains comparable to the full model.
+      The BIC-selected model streamlines the regression by focusing on the most statistically informative predictors while removing redundant or collinear ones. In this case, the model retains key physical variables such as `parallax`, `dec_x`, and `pmdec`, which directly relate to distance and motion, along with essential photometric terms (`g_mag`, `r_mag`, and `br_col`) that capture brightness and color information. By excluding less influential or overlapping predictors, the model achieves a more interpretable structure without sacrificing explanatory power.
+
+      The resulting Adjusted R² of 0.66 and RMSE of around 468 K are nearly identical to those of the full model, suggesting that the excluded variables contributed little unique information and primarily introduced multicollinearity. This outcome demonstrates that model parsimony, achieved through BIC-driven selection, can yield a simpler yet equally effective representation of stellar temperature variation, improving interpretability while maintaining predictive accuracy.
+
 
 # Principal Component Regression (PCR)
 
       PCA transforms correlated predictors into orthogonal components, reducing dimensionality while preserving variance structure.
 
 ```{r}
-# 1. Extract same predictor columns explicitly
 predictor_names <- setdiff(names(train), "teff")
 
 X_train <- train[, predictor_names]
 X_test  <- test[, predictor_names]
 
-# 2. Standardize using same center and scale
+# Standardize using same center and scale
 X_train_scaled <- scale(X_train, center = TRUE, scale = TRUE)
 X_test_scaled  <- scale(X_test,
                         center = attr(X_train_scaled, "scaled:center"),
                         scale  = attr(X_train_scaled, "scaled:scale"))
 
-# 3. PCA on standardized training data
+# PCA on standardized training data
 pca <- prcomp(X_train_scaled)
 
-# 4. Determine number of PCs for 95% variance
+# Determine number of PCs for 95% variance
 explained <- cumsum(pca$sdev^2) / sum(pca$sdev^2)
 k <- which(explained >= 0.95)[1]
-cat("Number of components explaining ≥95% variance:", k, "\\n")
+cat("Number of components explaining greater than 95% variance:", k, "\\n")
 
-# 5. Transform to PC space
+# Transform to PC space
 Z_train <- as.data.frame(pca$x[, 1:k, drop = FALSE])
-Z_test  <- as.data.frame(predict(pca, newdata = X_test_scaled)[, 1:k, drop = FALSE])
+Z_test  <- as.data.frame(predict(pca, 
+                                 newdata = X_test_scaled)[, 1:k, 
+                                                          drop = FALSE])
 
-# 6. Fit PCR model and evaluate
+# Fit PCR model and evaluate
 pcr_model <- lm(train$teff ~ ., data = Z_train)
 pred_pcr  <- predict(pcr_model, newdata = Z_test)
 
@@ -222,48 +248,45 @@ rmse_pcr <- sqrt(mse_pcr)
 data.frame(MSE = mse_pcr, RMSE = rmse_pcr)
 ```
 
-      The first few principal components explain over 95% of the variance. However, when used for regression, PCR tends to increase RMSE relative to the best-subset model, due to loss of interpretability and minor information loss from truncation.
+      The first eight principal components capture over 95% of the total variance in the predictor space, confirming that the majority of the information can be represented in a lower-dimensional form. This dimensionality reduction effectively addresses multicollinearity by transforming correlated predictors into orthogonal components. However, when applied in regression, the PCR model produces a substantially higher RMSE of approximately 2838 K, compared to the 468 K observed in the best-subset model.
 
-\newpage
+      This increase in error reflects the trade-off between dimensionality reduction and predictive precision, although PCR stabilizes coefficient estimates and mitigates multicollinearity, it sacrifices direct interpretability and can lose subtle but meaningful information when truncating higher-order components. Consequently, while PCR provides valuable insights into the underlying structure of the data, it is less effective for precise temperature prediction in this context compared to the best-subset or full regression models.
+
 
 # Model Comparison and Discussion
 
-```{r}
-# === Full Model Metrics ===
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Full Model Metrics
 pred_full <- predict(full_model, newdata = test)
 mse_full <- mean((test$teff - pred_full)^2)
 rmse_full <- sqrt(mse_full)
 metrics_full <- data.frame(model = "Full Model", MSE = mse_full, RMSE = rmse_full)
 
-# === Best Subset Metrics ===
+# Best Subset Metrics
 pred_bic <- predict(model_bic, newdata = test)
 mse_bic <- mean((test$teff - pred_bic)^2)
 rmse_bic <- sqrt(mse_bic)
 metrics_bic <- data.frame(model = "Best-Subset", MSE = mse_bic, RMSE = rmse_bic)
 
-# === PCR Metrics ===
+# PCR Metrics
 mse_pcr <- mean((test$teff - pred_pcr)^2)
 rmse_pcr <- sqrt(mse_pcr)
 metrics_pcr <- data.frame(model = paste0("PCR (k=", k, ")"), MSE = mse_pcr, RMSE = rmse_pcr)
 
-# === Combine ===
-library(dplyr)
-
 model_comparison <- bind_rows(metrics_full, metrics_bic, metrics_pcr)
 model_comparison
-
 ```
 
-      Among all models, **best-subset selection** provides the most efficient trade-off between model simplicity and predictive accuracy. The full model marginally improves RMSE but at the cost of multicollinearity and interpretability. The PCR model, while statistically sound, sacrifices physical meaning of predictors.
+      Among all evaluated approaches, the best-subset selection model achieves the best balance between simplicity and predictive accuracy, producing nearly identical performance to the full model but with reduced redundancy and improved interpretability. The full model, while slightly more comprehensive, offers only marginal improvement in RMSE and suffers from inflated variance due to multicollinearity among magnitude variables. In contrast, the PCR model, despite being statistically stable and effective at decorrelating predictors, performs far worse in terms of predictive error and loses the physical interpretability of its components.
 
-      The findings highlight the importance of model parsimony in scientific inference—simpler models that capture core physical drivers (like parallax and color index) yield robust predictions and interpretable coefficients.
+      Overall, these results reinforce the principle of model parsimony that a model capturing the key astrophysical relationships such as parallax, galactic coordinates, and color index can explain most of the variation in stellar temperature without unnecessary complexity. This balance between accuracy and interpretability is particularly valuable in scientific modeling, where understanding the underlying mechanisms is as important as achieving precise predictions.
+
 
 # Conclusion
 
-1. **Key Predictors:** The best predictors of stellar temperature are color-based variables and parallax, reflecting the connection between color and temperature in stellar classification.
-2. **Model Performance:** The best-subset model performed comparably to the full model with lower complexity and reduced collinearity.
-3. **Assumptions:** Residual diagnostics supported normality and constant variance, validating linear regression assumptions.
-4. **Dimensionality Reduction:** PCR confirmed that most variance can be captured by a small number of principal components but led to slightly worse prediction accuracy.
-5. **Future Work:** Nonlinear models or log transformations (e.g., `log(teff)` vs `log(brightness)`) may capture subtle relationships missed by linear modeling.
+      In this analysis, the Best-Subset Selection (BSS) procedure was used to systematically identify the most informative predictors of stellar temperature while minimizing model complexity. After renaming the response variable `teff` to y, the regsubsets() function evaluated all possible combinations of predictors, selecting the subset that minimized the Bayesian Information Criterion (BIC), a metric that rewards goodness of fit but penalizes excessive model size. The resulting optimal model included core predictors such as `parallax`, `dec_x`, `pmdec`, `g_mag`, `r_mag`, `L`, `B`, and `br_col`, effectively capturing the key spatial and photometric relationships influencing stellar temperature.
 
-**In summary**, this study demonstrates how linear regression and related techniques can uncover meaningful physical relationships between observable stellar features and intrinsic temperature. Through careful modeling, diagnostics, and validation, we achieve not only accurate prediction but also interpretable scientific insight into the physics governing the stars.
+      When tested on unseen data, this BIC-selected model achieved an RMSE of approximately 468 K, nearly identical to the full model but with fewer predictors and reduced multicollinearity. This demonstrates that the BSS approach successfully balances interpretability and predictive performance. Compared to the Principal Component Regression (PCR) model, which yielded a significantly higher RMSE ,around 2838 K, due to information loss and lack of physical interpretability, the BSS model stands out as the most efficient and scientifically meaningful choice.
+
+      In conclusion, the analysis confirms that a parsimonious linear model focused on essential predictors like parallax and color index provides accurate and interpretable estimates of stellar temperature. This aligns with the project’s objectives to explore linear relationships, diagnose multicollinearity, and compare modeling strategies, ultimately showing that simpler, well-selected models can perform as effectively as complex ones while offering clearer astrophysical insight.
+
