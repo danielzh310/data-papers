@@ -1,0 +1,167 @@
+---
+title: "Classifying Portuguese Wines: Predicting Wine Quality"
+author: "Daniel Zhu"
+date: "November 21, 2025"
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r, echo=FALSE}
+library(tidyverse)
+library(caret)
+library(pROC)
+library(ggplot2)
+library(gridExtra)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(xgboost)
+library(e1071)
+library(knitr)
+library(broom)
+```
+
+# Introduction
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Wine quality can be surprisingly subjective, but many of the chemical features that make up a wine are easy to measure. Because of this, wineries and distributors are becoming more interested in using data-driven tools to quickly flag wines that are likely to be **good** or **bad** before they reach consumers. In this analysis, we use the given `wineQuality.csv` dataset, which includes 6,497 Portuguese wines with measurements such as acidity levels, residual sugar, sulfates, and alcohol content, along with a binary label indicating whether each wine is classified as **GOOD** or **BAD**. Our aim is not to explain the chemistry behind wine quality, but simply to build models that can make accurate predictions. To do this, we compare traditional logistic regression with several machine learning methods—including decision trees, random forests, k-nearest neighbors, and XGBoost.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Our main goal is to see which model performs best at separating GOOD wines from BAD ones. Since mislabeling either class has equal cost in this context, we evaluate each model using tools like the ROC curve, AUC, and misclassification rate, choosing the optimal probability cutoff using Youden’s J statistic. This report will walk through exploratory data analysis, the training/test split, and the results for each model, ultimately comparing their performance. By the end, we will identify which model works best for this dataset and discuss what its strengths and limitations tell us about predicting wine quality using measurable chemical features alone.
+
+
+# Exploratory Data Analysis & Data Summary
+
+```{r}
+# Load data
+wine <- read.csv("wineQuality.csv", stringsAsFactors = TRUE)
+dim(wine)
+str(wine)
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The dataset contains 6,497 observations and 13 variables, most of which are numeric physicochemical measurements such as acidity levels, sulfates, alcohol content, and sulfur dioxide concentrations. The only non-numeric variables are density, which is stored as an ordinal factor, and label, which is a binary factor indicating whether each wine is classified as **GOOD** or **BAD**. Because our analysis focuses on predicting wine quality from measurable chemical characteristics, we ignore the non-informative descriptive fields and restrict our modeling to the numeric predictors included in the dataset.
+
+```{r}
+# Summary statistics
+num_vars <- c("fix.acid", "vol.acid", "citric", "sugar", "chlorides",
+              "free.sd", "total.sd", "pH", "sulphates", "alcohol")
+
+summary_table <- wine %>%
+  select(all_of(num_vars)) %>%
+  summary() 
+
+summary_table
+```
+```{r}
+# Class balance
+table(wine$label)
+prop.table(table(wine$label))
+
+# Checking for missing values and anomalies
+missing_counts <- sapply(wine, function(x) sum(is.na(x)))
+wine_clean <- na.omit(wine)
+dim(wine_clean)
+```
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The summary statistics for the numeric predictors show that each physicochemical variable falls within a reasonable and expected range for this type of wine dataset. Variables such as residual sugar, total sulfur dioxide, and sulphates display noticeably wider spreads, while others—like pH and citric acid—are more tightly concentrated. These summaries help establish the basic scale and variability of the chemical measurements before modeling. In addition to this, the class balance output indicates that the dataset is not perfectly balanced where BAD wines make up a slightly larger proportion of the observations than GOOD wines. Although the imbalance is not extreme, it is still useful to keep in mind when evaluating model performance, particularly for metrics that may be sensitive to unequal class sizes.
+
+## Univariate Distributions
+
+```{r}
+# Histograms for key variables
+p1 <- ggplot(wine_clean, aes(x = alcohol)) +
+  geom_histogram(binwidth = 0.5, fill = "lightblue", color = "black") +
+  labs(title = "Distribution of Alcohol", 
+       x = "Alcohol % by volume", 
+       y = "Frequency")
+
+p2 <- ggplot(wine_clean, aes(x = sulphates)) +
+  geom_histogram(binwidth = 0.05, fill = "lightgreen", color = "black") +
+  labs(title = "Distribution of Sulphates", 
+       x = "Sulfates", 
+       y = "Frequency")
+
+p3 <- ggplot(wine_clean, aes(x = sugar)) +
+  geom_histogram(binwidth = 1, fill = "lightpink", color = "black") +
+  labs(title = "Distribution of Residual Sugar", 
+       x = "Residual Sugar", 
+       y = "Frequency")
+
+p4 <- ggplot(wine_clean, aes(x = pH)) +
+  geom_histogram(binwidth = 0.05, fill = "lightgray", color = "black") +
+  labs(title = "Distribution of pH", 
+       x = "pH", 
+       y = "Frequency")
+
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The histograms reveal that not all predictors share the same distributional shape. Alcohol content and pH are both fairly symmetric and centered around typical values for Portuguese wines, with no extreme tails in either direction. Sulfates show a noticeable right-skew, with most wines concentrated around moderate sulfate levels and a smaller number extending toward higher values. Residual sugar is the most heavily skewed variable, with the vast majority of wines having very low sugar content but a long tail reaching far into higher concentrations. Although transformations could help stabilize these skewed distributions, such preprocessing is not required for this project, and the models we use especially tree-based methods can naturally accommodate predictors with non-normal shapes. For this reason, we continue using the variables on their original scales.
+
+## Relationship Between Predictors and Wine Quality
+
+```{r}
+# Boxplots of key predictors by class
+b1 <- ggplot(wine_clean, aes(x = label, y = alcohol)) +
+  geom_boxplot(fill = "lightblue") +
+  labs(title = "Alcohol by Wine Quality", 
+       x = "Label", 
+       y = "Alcohol %")
+
+b2 <- ggplot(wine_clean, aes(x = label, y = vol.acid)) +
+  geom_boxplot(fill = "lightgreen") +
+  labs(title = "Volatile Acidity by Wine Quality", 
+       x = "Label", 
+       y = "Volatile acidity")
+
+b3 <- ggplot(wine_clean, aes(x = label, y = sulphates)) +
+  geom_boxplot(fill = "lightpink") +
+  labs(title = "Sulphates by Wine Quality", 
+       x = "Label", y = "Sulfates")
+
+b4 <- ggplot(wine_clean, aes(x = label, y = sugar)) +
+  geom_boxplot(fill = "lightgray") +
+  labs(title = "Residual Sugar by Wine Quality", 
+       x = "Label", y = "Residual Sugar")
+
+grid.arrange(b1, b2, b3, b4, ncol = 2)
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The boxplots highlight clear differences in several predictors between **BAD** and **GOOD** wines. **GOOD** wines tend to have higher alcohol content, with their median sitting noticeably above that of **BAD** wines. Volatile acidity shows the opposite pattern GOOD wines generally exhibit lower volatile acidity, which aligns with the expectation that excessive acidity can signal lower quality. Sulfates appear fairly similar across the two groups, though **GOOD** wines show a slightly higher median and a wider spread of upper values. Residual sugar is highly variable in both classes, with a long tail of outliers, but the central tendency remains relatively similar between **GOOD** and **BAD** wines. Overall, these visual patterns suggest that alcohol and volatile acidity, in particular, may provide strong predictive value for distinguishing wine quality in our models.
+
+# Methods
+
+## Train–Test Split
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;To evaluate out-of-sample performance, we split the data into a **training set** and a **test set**. We use the training set to fit models and tune hyperparameters and retain the test set for final evaluation. We use a 70/30 split, stratified on the outcome variable `label` so that the class proportions are similar in both sets.
+
+```{r}
+set.seed(123) 
+
+wine_clean$label <- relevel(wine_clean$label, ref = "BAD")  
+
+train_index <- createDataPartition(wine_clean$label, p = 0.7, list = FALSE)
+wine_train <- wine_clean[train_index, ]
+wine_test  <- wine_clean[-train_index, ]
+
+prop.table(table(wine_train$label))
+prop.table(table(wine_test$label))
+```
+## Logistic Regression Model
+
+Our baseline model is a **logistic regression** using all numeric predictors:
+
+\[
+\Pr(\text{GOOD} \mid \mathbf{x}) = \text{logit}^{-1}\left(\beta_0 + \beta_1 \,\text{fix.acid} + \cdots + \beta_{11} \,\text{alcohol}\right)
+\]
+
+where 
+\[
+\text{logit}^{-1}(z) = \frac{1}{1 + e^{-z}}.
+\]
+Logistic regression provides interpretable coefficients and predicted probabilities for the **GOOD** class.
+
+## Machine Learning Models
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;To explore whether more flexible models could outperform logistic regression, we also fit several machine learning algorithms to the same training data. These included a `decision tree`, a `random forest`, `k-nearest neighbors`, and `Extreme Gradient Boosting`. Each of these models returns predicted probabilities for a wine being classified as GOOD, allowing us to evaluate them using consistent performance metrics. For every model, we constructed the ROC curve, computed the AUC, and identified the optimal probability threshold using Youden’s J statistic. Using this threshold, we generated the corresponding confusion matrix and calculated the misclassification rate, enabling a direct comparison of predictive accuracy across all methods.
