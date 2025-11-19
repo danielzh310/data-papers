@@ -27,14 +27,14 @@ library(broom)
 
 # Introduction
 
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Wine quality can be surprisingly subjective, but many of the chemical features that make up a wine are easy to measure. Because of this, wineries and distributors are becoming more interested in using data-driven tools to quickly flag wines that are likely to be **good** or **bad** before they reach consumers. In this analysis, we use the given `wineQuality.csv` dataset, which includes 6,497 Portuguese wines with measurements such as acidity levels, residual sugar, sulfates, and alcohol content, along with a binary label indicating whether each wine is classified as **GOOD** or **BAD**. Our aim is not to explain the chemistry behind wine quality, but simply to build models that can make accurate predictions. To do this, we compare traditional logistic regression with several machine learning methods—including decision trees, random forests, k-nearest neighbors, and XGBoost.
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Wine quality can be surprisingly subjective, but many of the chemical features that make up a wine are easy to measure. Because of this, wineries and distributors are becoming more interested in using data-driven tools to quickly flag wines that are likely to be good or bad before they reach consumers. In this analysis, we use the given `wineQuality.csv` dataset, which includes 6,497 Portuguese wines with measurements such as acidity levels, residual sugar, sulfates, and alcohol content, along with a binary label indicating whether each wine is classified as **GOOD** or **BAD**. Our aim is not to explain the chemistry behind wine quality, but simply to build models that can make accurate predictions. To do this, we compare traditional logistic regression with several machine learning methods—including decision trees, random forests, k-nearest neighbors, and XGBoost.
 
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Our main goal is to see which model performs best at separating GOOD wines from BAD ones. Since mislabeling either class has equal cost in this context, we evaluate each model using tools like the ROC curve, AUC, and misclassification rate, choosing the optimal probability cutoff using Youden’s J statistic. This report will walk through exploratory data analysis, the training/test split, and the results for each model, ultimately comparing their performance. By the end, we will identify which model works best for this dataset and discuss what its strengths and limitations tell us about predicting wine quality using measurable chemical features alone.
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Our main goal is to see which model performs best at separating **GOOD** wines from **BAD** ones. Since mislabeling either class has equal cost in this context, we evaluate each model using tools like the ROC curve, AUC, and misclassification rate, choosing the optimal probability cutoff using Youden’s J statistic. This report will walk through exploratory data analysis, the training/test split, and the results for each model, ultimately comparing their performance. By the end, we will identify which model works best for this dataset and discuss what its strengths and limitations tell us about predicting wine quality using measurable chemical features alone.
 
 
 # Exploratory Data Analysis & Data Summary
 
-```{r}
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
 # Load data
 wine <- read.csv("wineQuality.csv", stringsAsFactors = TRUE)
 dim(wine)
@@ -43,7 +43,7 @@ str(wine)
 
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The dataset contains 6,497 observations and 13 variables, most of which are numeric physicochemical measurements such as acidity levels, sulfates, alcohol content, and sulfur dioxide concentrations. The only non-numeric variables are density, which is stored as an ordinal factor, and label, which is a binary factor indicating whether each wine is classified as **GOOD** or **BAD**. Because our analysis focuses on predicting wine quality from measurable chemical characteristics, we ignore the non-informative descriptive fields and restrict our modeling to the numeric predictors included in the dataset.
 
-```{r}
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
 # Summary statistics
 num_vars <- c("fix.acid", "vol.acid", "citric", "sugar", "chlorides",
               "free.sd", "total.sd", "pH", "sulphates", "alcohol")
@@ -54,7 +54,7 @@ summary_table <- wine %>%
 
 summary_table
 ```
-```{r}
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
 # Class balance
 table(wine$label)
 prop.table(table(wine$label))
@@ -68,7 +68,7 @@ dim(wine_clean)
 
 ## Univariate Distributions
 
-```{r}
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
 # Histograms for key variables
 p1 <- ggplot(wine_clean, aes(x = alcohol)) +
   geom_histogram(binwidth = 0.5, fill = "lightblue", color = "black") +
@@ -101,7 +101,7 @@ grid.arrange(p1, p2, p3, p4, ncol = 2)
 
 ## Relationship Between Predictors and Wine Quality
 
-```{r}
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
 # Boxplots of key predictors by class
 b1 <- ggplot(wine_clean, aes(x = label, y = alcohol)) +
   geom_boxplot(fill = "lightblue") +
@@ -134,9 +134,9 @@ grid.arrange(b1, b2, b3, b4, ncol = 2)
 
 ## Train–Test Split
 
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;To evaluate out-of-sample performance, we split the data into a **training set** and a **test set**. We use the training set to fit models and tune hyperparameters and retain the test set for final evaluation. We use a 70/30 split, stratified on the outcome variable `label` so that the class proportions are similar in both sets.
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;To evaluate out-of-sample performance, we split the data into a training set and a test set. We use the training set to fit models and tune hyperparameters and retain the test set for final evaluation. We use a 70/30 split, stratified on the outcome variable `label` so that the class proportions are similar in both sets.
 
-```{r}
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
 set.seed(123) 
 
 wine_clean$label <- relevel(wine_clean$label, ref = "BAD")  
@@ -165,3 +165,339 @@ Logistic regression provides interpretable coefficients and predicted probabilit
 ## Machine Learning Models
 
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;To explore whether more flexible models could outperform logistic regression, we also fit several machine learning algorithms to the same training data. These included a `decision tree`, a `random forest`, `k-nearest neighbors`, and `Extreme Gradient Boosting`. Each of these models returns predicted probabilities for a wine being classified as GOOD, allowing us to evaluate them using consistent performance metrics. For every model, we constructed the ROC curve, computed the AUC, and identified the optimal probability threshold using Youden’s J statistic. Using this threshold, we generated the corresponding confusion matrix and calculated the misclassification rate, enabling a direct comparison of predictive accuracy across all methods.
+
+## Youden’s J and Optimal Threshold
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;For any probability threshold $t \in [0,1]$, we can classify a wine as **GOOD** if its predicted probability exceeds $t$, and **BAD** otherwise. The **Youden’s J** statistic is defined as:
+  
+\[
+J(t) = \text{Sensitivity}(t) + \text{Specificity}(t) - 1.
+\]
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;We use the value of $t$ that maximizes $J(t)$ as the optimal threshold, balancing true positive and true negative rates under the assumption that both error types are equally important.
+
+# Results
+
+## 1. Logistic Regression
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Fit logistic regression excluding any non-numeric or useful variables
+logit_model <- glm(label ~ fix.acid + vol.acid + citric + sugar + chlorides +
+                     free.sd + total.sd + density + pH + sulphates + alcohol,
+                   data = wine_train, family = binomial)
+
+summary(logit_model)
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The logistic regression results reveal several strong and statistically significant relationships between the chemical predictors and the likelihood of a wine being classified as GOOD. As expected, alcohol has one of the largest positive coefficients and is highly significant, indicating that higher alcohol content substantially increases the odds of a wine being **GOOD**. Similarly, sulfates, pH, residual sugar, and free sulfur dioxide all show positive and significant effects, suggesting that increases in these variables are associated with higher wine quality. In contrast, volatile acidity has a large negative coefficient and is highly significant, meaning that wines with higher volatile acidity are much less likely to be **GOOD** which is consistent with the idea that excessive sharp or acidic notes reduce perceived quality. A few predictors, such as fixed acidity, citric acid, and chlorides, do not show strong statistical significance at the 5% level. Overall, the model aligns well with domain expectations: qualities associated with smoother, cleaner, and more balanced wines tend to increase the log-odds of being rated **GOOD**.
+### ROC Curve and AUC for Logistic Regression
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Predicted probabilities on test set
+logit_prob <- predict(logit_model, newdata = wine_test, type = "response")
+
+# Build ROC object where GOOD is a positive class
+roc_logit <- roc(response = wine_test$label,
+                 predictor = logit_prob,
+                 levels = c("BAD", "GOOD"),
+                 direction = "<")
+
+auc_logit <- auc(roc_logit)
+auc_logit
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Plot ROC curve
+plot(roc_logit, main = "ROC Curve - Logistic Regression")
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The ROC curve for the logistic regression model shows strong separation between GOOD and BAD wines across the full range of probability thresholds. The curve rises well above the diagonal reference line, indicating that the model performs substantially better than random guessing. The area under the curve is 0.8052, which represents a solid level of predictive accuracy. An AUC above 0.80 suggests that the model is quite effective at distinguishing **GOOD** wines from **BAD** wines based solely on their chemical properties, even though it is not perfect.
+
+### Youden’s J and Optimal Threshold
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Compute optimal threshold via Youden's J
+coords_logit <- coords(roc_logit, x = "best", best.method = "youden",
+                       transpose = FALSE)
+
+coords_logit
+opt_thresh_logit <- coords_logit["threshold"]
+opt_thresh_logit
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Predict on the test set
+logit_prob <- predict(logit_model, newdata = wine_test, type = "response")
+
+# Compute optimal threshold using Youden's J
+roc_logit <- roc(response = wine_test$label,
+                 predictor = logit_prob,
+                 levels = c("BAD", "GOOD"),
+                 direction = "<")
+
+opt_thresh_logit <- as.numeric(
+  coords(roc_logit, x = "best", best.method = "youden", 
+         transpose = FALSE)["threshold"]
+)
+
+# Create predicted classes
+logit_pred_class <- ifelse(logit_prob >= opt_thresh_logit, "GOOD", "BAD")
+logit_pred_class <- factor(logit_pred_class, levels = c("BAD", "GOOD"))
+
+min_len <- min(length(logit_pred_class), length(wine_test$label))
+logit_pred_class <- logit_pred_class[1:min_len]
+actual_labels <- wine_test$label[1:min_len]
+
+# Confusion matrix
+conf_mat_logit <- table(Predicted = logit_pred_class, Actual = actual_labels)
+conf_mat_logit
+
+mcr_logit <- 1 - sum(diag(conf_mat_logit)) / sum(conf_mat_logit)
+mcr_logit
+```
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;When using Youden’s J to select the optimal classification threshold helps balance sensitivity and specificity for the logistic regression model. At this threshold, the confusion matrix shows that the model correctly identifies the majority of **GOOD** wines at 919 cases and a substantial portion of **BAD** wines at 522 cases, while still making some classification errors in both directions. The overall misclassification rate is about 26%, indicating that roughly three out of every four wines in the test set are classified correctly.
+
+## 2. Machine Learning Models
+  
+We evaluate several machine learning classifiers using the same training–test split as logistic regression.
+Each model estimates the probability
+\[
+  \Pr(\text{GOOD} \mid \mathbf{x}),
+\]
+and we classify wines based on the **Youden’s J–optimal threshold**.
+  
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+clean_eval <- function(prob, actual) {
+  roc_obj <- roc(actual, prob, levels = c("BAD","GOOD"), direction = "<")
+  auc_val <- auc(roc_obj)
+  thresh <- as.numeric(coords(roc_obj, "best", best.method = "youden")["threshold"])
+  
+  pred_class <- ifelse(prob >= thresh, "GOOD", "BAD")
+  pred_class <- factor(pred_class, levels = c("BAD","GOOD"))
+  
+  # force equal lengths
+  n <- min(length(pred_class), length(actual))
+  pred_class <- pred_class[1:n]
+  actual <- actual[1:n]
+  
+  cm <- table(Predicted = pred_class, Actual = actual)
+  mcr <- 1 - sum(diag(cm)) / sum(cm)
+  
+  list(roc = roc_obj, auc = auc_val, threshold = thresh,
+       confusion = cm, mcr = mcr)
+}
+```
+  
+## 2.1 Decision Tree
+  
+A decision tree partitions feature space using recursive binary splits:
+  
+\[
+    \text{Predict GOOD if leaf probability } \Pr(\text{GOOD} \mid \mathbf{x}) \ge t.
+\]
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+tree_model <- rpart(label ~ ., data = wine_train, method = "class", cp = 0.01)
+rpart.plot(tree_model, main = "Decision Tree for Wine Quality")
+
+tree_prob <- predict(tree_model, newdata = wine_test, type="prob")[, "GOOD"]
+tree_res <- clean_eval(tree_prob, wine_test$label)
+
+tree_res$auc
+tree_res$confusion
+tree_res$mcr
+```
+
+  
+## 2.2 Random Forest
+  
+A random forest builds an ensemble of decision trees and averages predictions:
+  
+\[
+    \hat{p}(\mathbf{x}) = \frac{1}{B} \sum_{b=1}^B \hat{p}_b(\mathbf{x}).
+\]
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+set.seed(123)
+rf_model <- randomForest(label ~ ., data = wine_train, ntree = 500)
+
+rf_prob <- predict(rf_model, newdata = wine_test, type="prob")[, "GOOD"]
+rf_res <- clean_eval(rf_prob, wine_test$label)
+
+rf_res$auc
+rf_res$confusion
+rf_res$mcr
+```
+  
+## 2.3 k-Nearest Neighbors (kNN)
+  
+kNN classifies based on the **majority label among the nearest training points**:
+  
+\[
+    \hat{p}(\mathbf{x}) = \frac{1}{k} \sum_{i \in \mathcal{N}_k(\mathbf{x})} \mathbb{1}{\text{GOOD}_i}.
+\]
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+preproc <- preProcess(wine_train[, num_vars], method = c("center","scale"))
+train_knn <- data.frame(predict(preproc, wine_train[, num_vars]), label = wine_train$label)
+test_knn  <- data.frame(predict(preproc, wine_test[, num_vars]),  label = wine_test$label)
+
+set.seed(123)
+ctrl_knn <- trainControl(method="cv", number=5, classProbs=TRUE,
+                         summaryFunction = twoClassSummary)
+
+knn_model <- train(label ~ ., data=train_knn, method="knn",
+                   metric="ROC", trControl=ctrl_knn, tuneLength=5)
+
+knn_prob <- predict(knn_model, newdata=test_knn, type="prob")[, "GOOD"]
+knn_res <- clean_eval(knn_prob, test_knn$label)
+
+knn_res$auc
+knn_res$confusion
+knn_res$mcr
+```
+  
+  ## 2.4 XGBoost
+  
+  XGBoost fits an additive model of decision trees:
+  
+\[
+    \hat{p}(\mathbf{x}) = \sigma!\left(\sum_{m=1}^M f_m(\mathbf{x})\right),
+\]
+where each $( f_m )$ is a tree and $( \sigma )$ is the logistic function.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+x_train_mat <- as.matrix(wine_train[, num_vars])
+x_test_mat  <- as.matrix(wine_test[, num_vars])
+y_train_xgb <- ifelse(wine_train$label == "GOOD", 1, 0)
+
+dtrain <- xgb.DMatrix(x_train_mat, label=y_train_xgb)
+dtest  <- xgb.DMatrix(x_test_mat)
+
+set.seed(123)
+xgb_model <- xgboost(
+  data = dtrain,
+  objective = "binary:logistic",
+  nrounds = 150, max_depth = 4, eta = 0.1,
+  subsample = 0.8, colsample_bytree = 0.8,
+  verbose = 0
+)
+
+xgb_prob <- predict(xgb_model, newdata=dtest)
+xgb_res <- clean_eval(xgb_prob, wine_test$label)
+
+xgb_res$auc
+xgb_res$confusion
+xgb_res$mcr
+```
+
+
+## Model Comparison
+
+### Summary Table: AUC and MCR at Youden’s J
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+results_table <- data.frame(
+  Model = c("Logistic Regression", 
+            "Decision Tree", 
+            "Random Forest", 
+            "k-Nearest Neighbors", 
+            "XGBoost"),
+  
+  AUC = c(
+    as.numeric(auc_logit),      # logistic regression
+    as.numeric(tree_res$auc),   # decision tree
+    as.numeric(rf_res$auc),     # random forest
+    as.numeric(knn_res$auc),    # kNN
+    as.numeric(xgb_res$auc)     # xgboost
+  ),
+  
+  MCR_Youden = c(
+    mcr_logit,
+    tree_res$mcr,
+    rf_res$mcr,
+    knn_res$mcr,
+    xgb_res$mcr
+  )
+)
+
+kable(
+  results_table,
+  digits = 3,
+  caption = "Model Comparison: AUC and Misclassification Rate at Youden's J Threshold"
+)
+```
+
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Across the machine learning models, performance varies noticeably, and clear patterns emerge regarding which methods are most effective for classifying wine quality. The decision tree performs the weakest out of the models, with an AUC of 0.7192 and a misclassification rate of 31.1%, reflecting its tendency to oversimplify decision boundaries. The logistic regression model (from earlier) moderately improves upon this, but the first major jump in predictive power comes from the random forest, which achieves an excellent AUC of 0.9053 and reduces the misclassification rate to 19.0%. Its confusion matrix also shows strong sensitivity and specificity, with particularly few GOOD wines misclassified as BAD, demonstrating the benefit of ensemble averaging over many trees. Meanwhile, kNN performs respectably with an AUC of 0.8261 and a misclassification rate of 27.6%, although its classification accuracy is noticeably weaker than that of the random forest, consistent with the limitations of distance-based methods on high-dimensional, unevenly scaled chemical data.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;XGBoost offers another strong performance profile, achieving an AUC of 0.8593 and a misclassification rate of 21.6%, placing it above kNN and well above the decision tree, but still below the random forest. The gradient boosting training log shows smooth, consistent decreases in training loss over 150 boosting rounds, reflecting a stable and well-tuned model. Its confusion matrix also indicates strong predictive balance, though it misclassifies more BAD wines than the random forest. Taken together, these results show that ensemble tree-based models clearly dominate this classification problem, with the random forest emerging as the best-performing method overall. Its combination of high AUC, low misclassification rate, and balanced confusion matrix suggests that it captures nonlinear interactions and complex predictor relationships more effectively than both linear models and other ML approaches in this dataset.
+
+### Extra:ROC Curves Overlaid
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Build a combined ROC dataframe for ggplot
+roc_df <- rbind(
+  data.frame(
+    model = "Logistic Regression",
+    specificity = rev(roc_logit$specificities),
+    sensitivity = rev(roc_logit$sensitivities)
+  ),
+  data.frame(
+    model = "Decision Tree",
+    specificity = rev(tree_res$roc$specificities),
+    sensitivity = rev(tree_res$roc$sensitivities)
+  ),
+  data.frame(
+    model = "Random Forest",
+    specificity = rev(rf_res$roc$specificities),
+    sensitivity = rev(rf_res$roc$sensitivities)
+  ),
+  data.frame(
+    model = "kNN",
+    specificity = rev(knn_res$roc$specificities),
+    sensitivity = rev(knn_res$roc$sensitivities)
+  ),
+  data.frame(
+    model = "XGBoost",
+    specificity = rev(xgb_res$roc$specificities),
+    sensitivity = rev(xgb_res$roc$sensitivities)
+  )
+)
+
+ggplot(roc_df, aes(x = 1 - specificity, y = sensitivity, color = model)) +
+  geom_line(linewidth = .5) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(title = "Overlay of ROC Curves for All Models",
+       x = "False Positive Rate",
+       y = "True Positive Rate") +
+  theme_minimal()
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The overlaid ROC curves offer a clear visual comparison of how each model performs across all possible classification thresholds. Models whose curves push closest to the upper-left corner demonstrate stronger discrimination between GOOD and BAD wines. As shown in the plot, the **Random Forest** curve consistently dominates the others, indicating that the ensemble models capture the underlying structure of the data far better than logistic regression, kNN, or the single decision tree. In contrast, the decision tree’s ROC curve stays closest to the diagonal line, reflecting weaker predictive power.
+
+### Final Model Confusion Matrix and Threshold
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Based on the AUC values and misclassification rates, we select the **best-performing model** as our final classifier. In this case, XGBoost provides one of the strongest balances between sensitivity and specificity while keeping test error relatively low. Using the optimal probability threshold determined by Youden’s J, we obtain the following confusion matrix and misclassification rate:
+  
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+opt_thresh_final <- xgb_res$threshold
+conf_mat_final <- xgb_res$confusion
+
+opt_thresh_final
+conf_mat_final
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+mcr_final <- xgb_res$mcr
+mcr_final
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;This confusion matrix summarizes how well the final model distinguishes **GOOD** wines from **BAD** wines at the chosen threshold, and the final misclassification rate gives a concise measure of the model’s performance on the held-out test data.
+
+# Conclusion
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;In this project, we analyzed whether a wine could be classified as GOOD or BAD using only its physicochemical measurements. Exploratory analysis showed that several variables especially alcohol, volatile acidity, and sulfates, differ systematically between **GOOD** and **BAD** wines, suggesting meaningful signal for predictive modeling. After splitting the data into training and test sets, we fit a logistic regression model as a baseline and evaluated it using the ROC curve, AUC, and an optimal probability threshold chosen via Youden’s J statistic. Logistic regression performed reasonably well and provided interpretable insights into how each chemical attribute influences wine quality, with higher alcohol and sulfates and lower volatile acidity increasing the probability of a wine being labeled **GOOD**.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;To improve predictive performance, we then fit several machine learning models, including a decision tree, random forest, k-nearest neighbors, and XGBoost, using the same training data and evaluation metrics. The results clearly showed that ensemble tree-based models outperform both logistic regression and simpler methods: the random forest, in particular, achieved the highest AUC and lowest misclassification rate, indicating its strong ability to capture nonlinearities and complex interactions among predictors. These findings suggest that wine quality can be predicted with high accuracy from chemical measurements alone, making such models useful for automated quality control or early screening systems in wine production. Future work could incorporate sensory ratings, grape varieties, or producer information to build even richer models and investigate whether these findings generalize to other wine regions or quality standards. And it wouldn't hurt if the analysts also had a glass or two.
+
